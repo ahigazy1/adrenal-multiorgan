@@ -113,16 +113,27 @@ def check_manifest(value: dict, kind: str, recipe: str | None = None) -> dict:
     return value
 
 
+HASH_THREADS = 16  # hashlib releases the GIL, so threads hash in parallel; beyond this the disk is the limit
+
+
+def hash_files(paths: list[Path]) -> list[dict]:
+    with ThreadPoolExecutor(max_workers=HASH_THREADS) as workers:
+        return list(workers.map(file_info, paths))
+
+
 def matches_local(path: Path, info: dict) -> bool:
     return path.is_file() and path.stat().st_size == info['size'] and file_info(path) == info
 
 
 def verify_local(root: Path, value: dict) -> None:
-    for index, (name, info) in enumerate(value['files'].items(), 1):
-        if not matches_local(safe_path(root, name), info):
-            raise RuntimeError(f'Missing or corrupt artifact: {root / name}')
-        if index % 100 == 0:
-            log.info('Verified %d/%d files', index, len(value['files']))
+    paths = [safe_path(root, name) for name in value['files']]
+    for path in paths:
+        if not path.is_file():
+            raise RuntimeError(f'Missing artifact: {path}')
+    for path, actual, expected in zip(paths, hash_files(paths), value['files'].values()):
+        if actual != expected:
+            raise RuntimeError(f'Missing or corrupt artifact: {path}')
+    log.info('Verified %d files', len(paths))
 
 
 def cache_files(data: Path) -> list[Path]:
@@ -181,7 +192,8 @@ def cache_files(data: Path) -> list[Path]:
 
 
 def build_cache_manifest(data: Path, recipe: str) -> dict:
-    files = {p.relative_to(data).as_posix(): file_info(p) for p in cache_files(data)}
+    paths = cache_files(data)
+    files = {p.relative_to(data).as_posix(): info for p, info in zip(paths, hash_files(paths))}
     if files['atlas/checkpoint_final.pth']['sha256'] != ATLASNET_SHA256:
         raise RuntimeError('AtlasNet weights failed their pinned checksum')
     return manifest('preprocessed', recipe, files)
