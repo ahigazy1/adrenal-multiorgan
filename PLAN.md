@@ -22,6 +22,7 @@ Data preparation (download, cleaning, preprocessing, publishing the cache to Hug
 | Augmentation | reduced: no blur, noise or simulated low resolution; rotation +/-10 degrees and scaling 0.9-1.1, each with probability 0.1 |
 | Loss | cross-entropy + focal Tversky (false negatives 0.6, false positives 0.4, exponent 0.75), deep supervision |
 | Resampling | SimpleITK for both: `resample_data_or_seg_to_shape_sitk` prepares CT and labels for the training cache and CT at inference; `resample_logits_to_shape_sitk` brings the network output back to the original grid |
+| CT intensity normalization | AtlasNet's, unchanged: clip to [-1000, 629] HU, subtract -182.95, divide by 406.48 (the values stored in `atlasnet_plans.json`). They are not recomputed from our data, because the transferred weights expect inputs on this scale |
 | Image reader | nnU-Net's `NibabelIOWithReorient`, as in AtlasNet's plans |
 | Train/validation split | nnU-Net's default (5 folds, seed 12345) over all non-test scans, fold 0; validation is used for monitoring and for choosing the best checkpoint |
 | Checkpoints | every 100 epochs, plus the best (by nnU-Net's validation Dice moving average); uploaded to Hugging Face every 100 epochs |
@@ -77,6 +78,8 @@ The three resamplers available (nnU-Net's default, AtlasNet's `resample_torch_fo
 About one in seven TotalSegmentator CTs in a local sample has an orientation matrix skewed by about 1e-4. ITK-based readers (nnU-Net's default `SimpleITKIO`) refuse these files; the nibabel reader opens them. `dataset.json` therefore names `NibabelIOWithReorient`. The CT files themselves are not altered.
 
 ## Open
+
+0. **FLARE22 as a fourth source.** Its 50 labelled CTs (about 1.5 GB; on Hugging Face as `MedOtter/FLARE22`) carry all nine of our structures: liver 1, right kidney 2, spleen 3, pancreas 4, aorta 5, inferior vena cava 6, right adrenal 7, left adrenal 8, left kidney 13. Adding it is one more id table in `cohort_scan.py`. Points to settle: FLARE22 has no public labelled test set (the 40/10 split on that mirror is the mirror's own), so either all 50 go to training or we fix a held-out list as for BTCV; its scans are contrast-enhanced scans of pancreas-cancer patients, so they add pathology but not variety of protocol; its licence is CC BY-SA 4.0 for images with research-only labels, which constrains how a cache containing it may be shared; and AtlasNet's pretraining data very likely includes it, as with the other three.
 
 1. BTCV redistribution terms, before any BTCV-derived files are made public.
 2. Confirm the nnU-Net plans for the new dataset keep AtlasNet's architecture so its weights load.
