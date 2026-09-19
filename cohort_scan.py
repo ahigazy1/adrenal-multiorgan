@@ -56,6 +56,9 @@ LABEL_FOLDERS = (('amos', 'train/labelsTr', 'train'), ('amos', 'valid/labelsVa',
                  ('btcv', 'RawData/Training/label', 'train'), ('flare', 'labels', 'train'))
 
 log = logging.getLogger('cohort_scan')
+# nibabel warns once per file about a header field (qfac) that some source files leave at 0; it then uses the
+# standard value, as nnU-Net's reader does. Only real errors from nibabel are shown.
+logging.getLogger('nibabel').setLevel(logging.ERROR)
 
 
 def judge_gland(mask, voxel_ml):
