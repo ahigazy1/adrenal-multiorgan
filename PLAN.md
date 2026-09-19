@@ -1,10 +1,10 @@
 # Specification
 
-Last updated September 19, 2026. Status: all five steps and the Google Cloud scripts are written; steps 1-3 and the trainer are checked locally on CPU; nothing has been run on Google Cloud or a GPU yet. Results used for publication come only from the logged run on the training machine. Local runs are for testing code.
+Last updated September 19, 2026. Status: every step is written. Download, scan, dataset, split and preprocessing have run to completion on the Google Cloud machine; training, prediction and the upload/restore of the prepared data have not yet run there. Results used for publication come only from the logged run on that machine. Local runs are for testing code.
 
 ## Setup
 
-Everything runs on one Google Cloud Spot VM with an NVIDIA RTX PRO 6000 (96 GB) and 48 vCPUs: download, label cleaning, split, nnU-Net preprocessing, training and prediction on the held-out scans. It is started with one command and may be interrupted at any time, so every stage either continues or starts again by itself when the machine is started again. The tables of the cleaning and the split, the logs, the checkpoints and the predictions' scores are uploaded to Hugging Face. (An earlier plan prepared the data on Colab and published a 200 GB preprocessed cache; preparing on the training machine costs a few GPU-idle hours and removes that transfer.)
+Everything runs on one Google Cloud Spot VM with an NVIDIA RTX PRO 6000 (96 GB) and 48 vCPUs: download, label cleaning, split, nnU-Net preprocessing, training and prediction on the held-out scans. It is started with one command and may be interrupted at any time, so every stage either continues or is skipped when the machine is started again. The tables of the cleaning and the split, the logs, the checkpoints and the predictions' scores are uploaded to Hugging Face. The prepared data (about 170 GB) is uploaded as well, in the background while training runs, so that a replacement machine can restore it instead of preparing again.
 
 ## Decided
 
@@ -25,7 +25,8 @@ Everything runs on one Google Cloud Spot VM with an NVIDIA RTX PRO 6000 (96 GB) 
 | CT intensity normalization | AtlasNet's, unchanged: clip to [-1000, 629] HU, subtract -182.95, divide by 406.48 (the values stored in `atlasnet_plans.json`). They are not recomputed from our data, because the transferred weights expect inputs on this scale |
 | Image reader | nnU-Net's `NibabelIOWithReorient`, as in AtlasNet's plans |
 | Test, validation, training | 20% / 16% / 64% of the kept scans of every source, stratified by slice thickness and adrenal volume (see below); validation is used for monitoring and for choosing the best checkpoint |
-| Hugging Face | private model repository `ahigazy1/adrenal-multiorgan-model`: tables, logs, checkpoints. The private dataset `ahigazy1/adrenal-multiorgan-cache` only holds a copy of the TotalSegmentator zip, because Zenodo is slow |
+| Hugging Face | private model repository `ahigazy1/adrenal-multiorgan-model`: tables, logs, checkpoints. Private dataset `ahigazy1/adrenal-multiorgan-cache`: our copy of the TotalSegmentator zip (Zenodo is slow) and the prepared data as about 10 GiB tar parts |
+| Machine limits | Spot pricing, us-central1, stopped by Google after at most 100 hours of running in one go; 500 GB disk |
 | Checkpoints | every 100 epochs, plus the best (by nnU-Net's validation Dice moving average); uploaded to Hugging Face every 100 epochs |
 
 ### Adrenal label cleaning rule
@@ -41,7 +42,20 @@ Applied per gland, to every source, in training and test data. Connected compone
 7. Slice thickness (the coarsest voxel axis) over 5 mm: the scan is excluded.
 8. Every removal and exclusion is recorded per case.
 
-Excluding the whole scan (rather than masking one gland) keeps the rule one sentence long. In a local test on 150 TotalSegmentator scans, rules 3-5 together excluded 17% (rules 3-4 alone about 8%); none failed the left/right check.
+Excluding the whole scan (rather than masking one gland) keeps the rule one sentence long. "Touches any edge" (rule 5) means any of the six faces of the image volume, not only the first and last slice; this conservative reading was kept deliberately.
+
+### What the rule excluded (Google Cloud run, September 19, 2026)
+
+1,608 scans were read without error; 214 were excluded and 1,394 kept.
+
+| Source | Scanned | Kept with adrenals | Kept without adrenals | Excluded | Reasons (scans) |
+|---|---:|---:|---:|---:|---|
+| TotalSegmentator | 1,228 | 626 | 396 | 206 (16.8%) | gland cut by an edge 111; gland of 1 mL or less 68; both 23; fragmented 4 |
+| AMOS22 | 300 | 292 | 0 | 8 (2.7%) | small 4; fragmented 2; cut by an edge 1; left/right check and small 1 (`amos_0156`) |
+| BTCV | 30 | 30 | 0 | 0 | |
+| FLARE22 | 50 | 50 | 0 | 0 | |
+
+Per rule (a scan can break more than one): cut by an edge 135 scans (190 glands, median 3.1 mL, so ordinary glands at the border of tightly cropped scans); 1 mL or less 96 scans (118 glands, median 0.35 mL); fragmented 6; left/right check 1. No scan in any source has a slice thickness over 5 mm, so rule 7 excluded nothing. Median organ volumes were plausible in every source (liver 1,221-1,660 mL, kidneys 128-196 mL, adrenals 3.1-5.5 mL), which confirms the label ids below.
 
 ### Learning-rate schedule: why this one
 
@@ -56,7 +70,17 @@ No dataset's published split is used. All kept scans are divided by one rule, so
 - The remaining four fifths are divided the same way into five folds for nnU-Net; fold 0 is trained, so its validation part is one fifth of the remainder (16% of all scans) and its training part is 64%.
 - `build_dataset.py` logs and saves the size, adrenal-volume median, slice-thickness mix and per-group counts of each part.
 
-TotalSegmentator is distributed at 1.5 mm isotropic, so slice-thickness variety comes from AMOS, BTCV and FLARE22 only. Because published test splits are not used, results are not directly comparable with numbers other papers report on those splits. Limitation that stays: AtlasNet was pretrained on AbdomenAtlas, which is assembled from public datasets that include these four, so the test set is held out from our fine-tuning but not necessarily from pretraining.
+Result of the split on the Google Cloud run:
+
+| Part | Scans | With adrenals | Median total adrenal volume | Slices <=2 / 2-4 / 4-5 mm |
+|---|---:|---:|---:|---|
+| Test | 279 (204 TotalSegmentator, 59 AMOS22, 6 BTCV, 10 FLARE22) | 200 (71.7%) | 7.59 mL | 218 / 15 / 46 |
+| Validation (fold 0) | 223 | 160 (71.7%) | 7.95 mL | 174 / 12 / 37 |
+| Training (fold 0) | 892 | 638 (71.5%) | 7.66 mL | 700 / 46 / 146 |
+
+A few scans whose own group is too small fall back to a coarser group label and then form tiny groups of their own, which `StratifiedKFold` places freely (it warns about this). The balance above shows this had no visible effect. The rule must not be changed once a run uses this split, because that would change which scans are held out.
+
+TotalSegmentator is distributed at 1.5 mm isotropic, so slice-thickness variety comes from AMOS22, BTCV and FLARE22 only. Because published test splits are not used, results are not directly comparable with numbers other papers report on those splits. Limitation that stays: AtlasNet was pretrained on AbdomenAtlas, which is assembled from public datasets that include these four, so the test set is held out from our fine-tuning but not necessarily from pretraining.
 
 ## Labels in each dataset
 
@@ -89,10 +113,18 @@ Decided: keep AtlasNet's [-1000, 629] HU. The window is wide because AtlasNet's 
 ## Open
 
 1. Redistribution terms of BTCV and of FLARE22 (research-only labels), before any files derived from them are made public.
-2. Confirm the nnU-Net plans for the new dataset keep AtlasNet's architecture so its weights load.
+2. Label resampling uses SimpleITK's label-linear interpolation. It makes small structures slightly smaller at 1 mm (about 1-2% for adrenals in local checks); to be stated in the methods.
 
 ## Work items
 
-1. First run on Google Cloud (`gcp/create_vm.sh`). Nothing in `gcp/`, `prepare.sh` or the pinned environment has been run yet; expect small fixes. Check the uploaded tables (exclusions per rule and source, balance of the split) while preprocessing runs.
-2. Look at the first epochs (time per epoch, GPU memory) before leaving the 2000-epoch run alone.
+1. First epochs on Google Cloud: time per epoch and GPU memory decide whether 2000 epochs fit the 100-hour limit of one run (about 71 hours at 128 s per epoch).
+2. Confirm on the real machine: the background upload of the prepared data, a restore on a replacement machine, the automatic switch-off, and `predict.py`.
 3. Add surface Dice and signed/absolute volume error to the evaluation (`predict.py` currently reports nnU-Net's Dice and voxel counts, from which volumes follow).
+
+## Lessons from the first runs
+
+- nnU-Net's progress bar writes carriage returns without newlines; sent through Google's startup-script logger it overflowed the logger, which closed the pipe and killed preprocessing. The bar now goes to a file.
+- Downloading the four sources at the same time got "429 Too Many Requests" from Hugging Face's CDN; they are downloaded one after the other, with retries. One after the other takes about 6 minutes.
+- nnU-Net's `preprocess_dataset()` imports `distutils`, which Python 3.12 removed; its three parts are called directly.
+- About one in seven TotalSegmentator CTs has a slightly skewed orientation matrix that ITK-based readers refuse; the nibabel reader is used.
+- Measured on the machine: scan about 6 minutes, dataset about 6 minutes, preprocessing about 20 minutes with 24-32 workers, prepared data 170 GB.

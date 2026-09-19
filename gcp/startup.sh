@@ -1,7 +1,8 @@
 #!/bin/bash
-# Runs on every boot. Restore a verified Hugging Face preprocessing cache, or build and upload it once.
-# Then restore/continue training, evaluate the held-out scans and switch off. Checkpoints and the cache
-# survive VM/disk deletion only after their uploads have completed successfully.
+# Runs on every boot. Restore a verified copy of the prepared data from Hugging Face, or prepare it here
+# (prepare.sh). Then train or continue training while the prepared data uploads in the background, evaluate the
+# held-out scans and switch off. Checkpoints and the prepared data survive deleting the VM and its disk only
+# once their uploads have completed.
 # Raw console output is kept locally; carriage returns are normalized before the guest-agent logger.
 # Set instance metadata hold=1 to boot without running anything or switching off.
 exec > >(tee -a /var/log/adrenal.log | tr '\r' '\n') 2>&1

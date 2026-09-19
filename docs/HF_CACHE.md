@@ -1,13 +1,16 @@
 # Preprocessing cache and fresh-VM recovery
 
-`gcp/startup.sh` runs `pixi run python hf_cache.py ensure --data data` before training.
+`gcp/startup.sh` runs `pixi run python hf_cache.py ensure --data data` before training. `ensure` makes the
+prepared data available on the local disk and uploads nothing. The upload is a second command,
+`hf_cache.py publish`, which `startup.sh` starts in the background at the lowest CPU and disk priority, so
+the GPU never waits for a 170 GB transfer that only a future replacement machine needs.
 The default cache is the private dataset repository `ahigazy1/adrenal-multiorgan-cache`.
 Checkpoints remain in the private model repository `ahigazy1/adrenal-multiorgan-model`.
 `ADRENAL_CACHE_REPO` and `ADRENAL_HF_REPO` can override those destinations.
 
 ## First successful preparation
 
-When there is no complete compatible cache, the VM runs `prepare.sh` as before.
+When there is no complete compatible cache, the VM runs `prepare.sh`.
 Preprocessing uses 24 workers, with raw tqdm output redirected to a file.
 After preparation succeeds, the cache validator requires all development cases,
 five nonoverlapping train/validation splits, foreground-sampling index files,
@@ -27,8 +30,13 @@ after an interruption on the same disk. A local `.preprocessed-local.json` recor
 completed build before uploading so retrying an upload does not rerun preprocessing.
 
 A `complete.json` manifest is committed last, only after the remote payload has been
-verified. The `.prepared` receipt is written only after successful publication or a
-verified restore. Training does not start with an incomplete cache.
+verified. The local `.prepared` receipt is written once the local data is complete and its
+manifest is built (files are hashed with 16 threads), or after a verified restore; it does not
+wait for the upload. Training never starts with incomplete local data. On a restart of the same
+machine, `ensure` checks that every expected file is present but does not hash 170 GB again, and
+`publish` continues with the parts that are not on Hugging Face yet (log:
+`/var/log/adrenal-cache-upload.log`). `startup.sh` waits for the upload at the very end, after
+prediction, before the machine switches itself off.
 
 ## New VM or deleted disk
 
@@ -39,7 +47,7 @@ archive is checksum-verified before extraction, then every extracted file is ver
 resampling and sampling-index extraction are skipped on a cache hit.
 
 A partial remote upload is not a complete cache. If its VM and disk were deleted before
-publication, another VM must prepare the data again. Deletion cannot recover data that
+publication, another VM must prepare the data again (about 40 minutes). Deletion cannot recover data that
 never reached Hugging Face. No cache from the failed September 19 preprocessing run is
 created retroactively by this code change.
 
@@ -81,14 +89,14 @@ From an existing clone in Google Cloud Shell:
 git pull --ff-only && bash gcp/create_vm.sh
 ```
 
-The first new VM builds and publishes the cache once. Later VMs restore it automatically.
+The first new VM builds the cache and publishes it while it trains. VMs created after that upload has completed restore it automatically.
 If no training checkpoint has ever been uploaded, training starts from AtlasNet rather
 than inventing an earlier training state.
 
 ## Checks
 
 ```bash
-python -m unittest discover -s tests -p test_hf_cache.py -v
+python -m pytest tests
 bash -n gcp/startup.sh
 python -m py_compile hf_cache.py train.py trainers/adrenal_multiorgan.py
 ```
