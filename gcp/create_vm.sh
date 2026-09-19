@@ -52,9 +52,9 @@ gcloud secrets add-iam-policy-binding HF_TOKEN --member="serviceAccount:$ACCOUNT
 # Spot GPU capacity differs by zone and by hour, so every us-central1 zone that offers this machine type is tried
 # in turn until one has room. Only "no capacity" moves on to the next zone; any other error (quota,
 # billing, permissions) would be the same everywhere, so it is shown and the script stops.
-ZONES=$(gcloud compute machine-types list --filter="name=g4-standard-48 AND zone~^us-central1-" --format="value(zone)" | sort)
+ZONES="us-central1-f us-central1-a us-central1-b us-central1-c"
 for ZONE in $ZONES; do
-    echo "Trying $ZONE ..."
+    echo "Trying $ZONE ... (up to two minutes, nothing is printed meanwhile)"
     if ERROR=$(gcloud compute instances create "$NAME" --zone="$ZONE" \
         --machine-type=g4-standard-48 --provisioning-model=SPOT --instance-termination-action=STOP \
         --create-disk="auto-delete=no,boot=yes,size=$DISK_GB,type=hyperdisk-balanced,provisioned-iops=$DISK_IOPS,provisioned-throughput=$DISK_MB_PER_S,$IMAGE" \
@@ -66,7 +66,7 @@ for ZONE in $ZONES; do
         echo "Progress: bash $HERE/progress.sh"
         exit 0
     fi
-    if ! grep -qiE "ZONE_RESOURCE_POOL_EXHAUSTED|STOCKOUT|does not have enough resources|currently unavailable" <<<"$ERROR"; then
+    if ! grep -qiE "ZONE_RESOURCE_POOL_EXHAUSTED|STOCKOUT|does not have enough resources|currently unavailable|not available in|does not exist in zone|Invalid value for field .resource.machineType" <<<"$ERROR"; then
         echo "$ERROR"
         echo "This is not a capacity problem, so trying other zones would not help. If the message mentions QUOTA, the"
         echo "project needs GPU quota: console.cloud.google.com/iam-admin/quotas, search for 'RTX PRO 6000' and 'GPUs (all regions)'."
