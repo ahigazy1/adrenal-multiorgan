@@ -9,6 +9,7 @@
 set -euo pipefail
 DATA=$(mkdir -p "${1:-data}" && cd "${1:-data}" && pwd)
 MODEL_REPO=${ADRENAL_HF_REPO:-ahigazy1/adrenal-multiorgan-model}
+PREPROCESS_WORKERS=${ADRENAL_PREPROCESS_WORKERS:-16}
 CPUS=$(nproc)
 export HF_XET_HIGH_PERFORMANCE=1
 mkdir -p results
@@ -38,6 +39,15 @@ cp "$DATA"/nnUNet_raw/Dataset902_AdrenalMultiorgan/build_dataset.{csv,json,log} 
 hf upload "$MODEL_REPO" results dataset --private --commit-message "Cohort scan, dataset and split tables"
 echo "=== tables uploaded: https://huggingface.co/$MODEL_REPO/tree/main/dataset"
 
-echo "=== preprocess $(date -u)"
-python preprocess.py --data "$DATA"
+PREPROCESS_CONSOLE="$DATA/nnUNet_preprocessed/Dataset902_AdrenalMultiorgan/preprocess-console.log"
+echo "=== preprocess $(date -u) with $PREPROCESS_WORKERS workers (full console: $PREPROCESS_CONSOLE)"
+# nnU-Net's tqdm bar writes carriage returns rather than newlines. If that stream is sent through Google's
+# startup-script logger it eventually exceeds the guest agent's scanner token limit and the logger closes the pipe,
+# killing preprocessing with SIGPIPE. Keep the raw progress stream in a file and only print sanitized output on error.
+if ! python preprocess.py --data "$DATA" --workers "$PREPROCESS_WORKERS" >>"$PREPROCESS_CONSOLE" 2>&1; then
+    echo "ERROR: preprocessing failed; last 80 sanitized lines follow"
+    tr '\r' '\n' < "$PREPROCESS_CONSOLE" | tail -n 80
+    exit 1
+fi
+echo "=== preprocess done $(date -u)"
 echo "=== prepare done $(date -u)"
