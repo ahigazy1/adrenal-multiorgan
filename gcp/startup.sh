@@ -1,14 +1,9 @@
 #!/bin/bash
-# Runs on the training machine at every start (create_vm.sh installs it as the machine's startup script).
-# First start: install the pinned environment, then download, clean and preprocess the data (prepare.sh, a few
-# hours). Every start: train or continue, and when training has finished, segment the held-out test scans. Then the machine switches itself off, so it never
-# sits idle on the bill. Whatever goes wrong, it also switches off; nothing restarts it automatically.
-#
-# Everything printed goes to /var/log/adrenal.log and to the machine's serial console, which Google keeps in
-# Cloud Logging, so progress.sh can show the reason for a failure even after the machine is off.
-#
-# To keep the machine on for a look around (no training, no switching off), set the metadata key "hold":
-#     gcloud compute instances add-metadata adrenal-train --zone=ZONE --metadata=hold=1     (remove-metadata --keys=hold to undo)
+# Runs on every boot. Restore a verified Hugging Face preprocessing cache, or build and upload it once.
+# Then restore/continue training, evaluate the held-out scans and switch off. Checkpoints and the cache
+# survive VM/disk deletion only after their uploads have completed successfully.
+# Raw console output is kept locally; carriage returns are normalized before the guest-agent logger.
+# Set instance metadata hold=1 to boot without running anything or switching off.
 exec > >(tee -a /var/log/adrenal.log | tr '\r' '\n') 2>&1
 echo "=== start $(date -u)"
 metadata() { curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/$1"; }
@@ -17,11 +12,11 @@ trap 'echo "=== switching off $(date -u)"; shutdown -h now' EXIT
 set -euo pipefail
 
 export HOME=/root PATH=/root/.pixi/bin:$PATH
-export PIXI_LOCKED=true   # pixi must use pixi.lock exactly, never re-solve the environment
+export PIXI_LOCKED=true
 export PYTHONUNBUFFERED=1 nnUNet_n_proc_DA=32 TORCHINDUCTOR_COMPILE_THREADS=16
+export HF_HUB_DISABLE_PROGRESS_BARS=1
 cd /opt
-# The code is frozen once preparation is complete because train.py refuses to continue a run whose code changed.
-# While preparation is incomplete, pull main so preprocessing/restart fixes are picked up after an interruption.
+# Freeze the working checkout after preparation, so an existing experiment cannot silently change.
 [ -d adrenal-multiorgan ] || git clone https://github.com/ahigazy1/adrenal-multiorgan
 cd adrenal-multiorgan
 if [ ! -f data/.prepared ]; then
@@ -30,7 +25,8 @@ fi
 command -v pixi >/dev/null || curl -fsSL https://pixi.sh/install.sh | PIXI_NO_PATH_UPDATE=1 bash
 pixi install
 
-# The Hugging Face token lives in Secret Manager; it is held in memory only and never printed.
+# HF_TOKEN must have read/write access to BOTH the private cache dataset and the model repository.
+# The token comes from Secret Manager and is never written to the repository or printed.
 ACCESS=$(metadata instance/service-accounts/default/token | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
 PROJECT=$(metadata project/project-id)
 HF_TOKEN=$(curl -sf -H "Authorization: Bearer $ACCESS" \
@@ -40,10 +36,9 @@ HF_TOKEN=$(curl -sf -H "Authorization: Bearer $ACCESS" \
 export HF_TOKEN
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-if [ ! -f data/.prepared ]; then   # after an interruption: downloads continue, the later steps start again
-    pixi run bash prepare.sh data
-    touch data/.prepared
-fi
+# This validates local completion, or restores a complete compatible cache, or builds and publishes one.
+# A plain touch is not enough: .prepared is written only after successful verification and publication.
+pixi run python hf_cache.py ensure --data data
 pixi run python train.py
 pixi run python predict.py
 echo "=== all done $(date -u)"

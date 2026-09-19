@@ -2,15 +2,13 @@
 
     python train.py
 
-It decides by itself what to do:
-  1. a checkpoint is on this disk              -> continue from it
-  2. otherwise, a checkpoint is on Hugging Face -> download it and continue
-  3. otherwise                                 -> start from the AtlasNet weights
+A local checkpoint is preferred. On a fresh disk, a complete, checksum-verified
+Hugging Face snapshot is restored before continuing with nnU-Net's checkpoint
+loader (network, optimizer, scaler and epoch), not its pretrained-weights loader.
+Without a saved run, training starts from the pinned AtlasNet weights.
 
-Every 100 epochs the trainer uploads the latest and best checkpoints and the logs to Hugging Face
-(see trainers/adrenal_multiorgan.py). When training and the final validation finish, everything is
-uploaded once more. Needs a CUDA GPU and a Hugging Face login with write access (`hf auth login`
-or the HF_TOKEN environment variable).
+Every 100 epochs the trainer uploads an atomic snapshot. A resume can recover
+only the last successfully uploaded checkpoint, not later work on a deleted disk.
 """
 import hashlib
 import json
@@ -22,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('ADRENAL_DATA', ROOT / 'data'))
-DATASET = 'Dataset902_AdrenalMultiorgan'  # written by the preprocessing step
+DATASET = 'Dataset902_AdrenalMultiorgan'
 PLANS = 'AtlasNetPlans'
 CONFIGURATION = '3d_fullres'
 FOLD = 0
@@ -39,7 +37,7 @@ os.environ['nnUNet_extTrainer'] = str(ROOT / 'trainers')
 sys.path.insert(0, str(ROOT / 'trainers'))
 os.environ.setdefault('nnUNet_compile', 'true')
 os.environ['MPLBACKEND'] = 'Agg'
-os.environ.setdefault('HF_XET_HIGH_PERFORMANCE', '1')  # faster Hugging Face transfers
+os.environ.setdefault('HF_XET_HIGH_PERFORMANCE', '1')
 
 MODEL_FOLDER = DATA / 'nnUNet_results' / DATASET / f'{TRAINER}__{PLANS}__{CONFIGURATION}'
 FOLD_FOLDER = MODEL_FOLDER / f'fold_{FOLD}'
@@ -52,32 +50,33 @@ def sha256(path):
 
 
 def has_checkpoint():
-    return any(FOLD_FOLDER.glob('checkpoint_*.pth'))
+    return any((FOLD_FOLDER / f'checkpoint_{name}.pth').is_file() for name in ('final', 'latest', 'best'))
 
 
 def fetch_model_from_hugging_face():
-    """Download this run's checkpoints if there are any. The repository is created first, so a wrong or missing login
-    fails here, loudly. It must never look like "no checkpoint yet": that would start again from AtlasNet and later
-    upload over the real run."""
-    from huggingface_hub import create_repo, snapshot_download
+    from hf_cache import restore_model
     log.info('No checkpoint on this disk; looking on Hugging Face (%s)', os.environ['ADRENAL_HF_REPO'])
-    create_repo(os.environ['ADRENAL_HF_REPO'], private=True, exist_ok=True)
-    snapshot_download(os.environ['ADRENAL_HF_REPO'], local_dir=DATA / 'nnUNet_results' / DATASET,
-                      allow_patterns=[f'{MODEL_FOLDER.name}/*'])
+    return restore_model(MODEL_FOLDER, run_record())
 
 
 def run_record():
-    """Fingerprint of everything that must stay the same for a resumed run to be the same experiment."""
+    """Fingerprint of everything that must stay fixed for the same experiment."""
     preprocessed = DATA / 'nnUNet_preprocessed' / DATASET
-    return {'trainer': sha256(ROOT / 'trainers/adrenal_multiorgan.py'), 'plans': sha256(preprocessed / f'{PLANS}.json'),
-            'split': sha256(preprocessed / 'splits_final.json'), 'atlasnet_weights': ATLASNET_SHA256,
-            'dataset': DATASET, 'fold': FOLD, 'seed': SEED}
+    record = {'trainer': sha256(ROOT / 'trainers/adrenal_multiorgan.py'), 'plans': sha256(preprocessed / f'{PLANS}.json'),
+              'split': sha256(preprocessed / 'splits_final.json'), 'atlasnet_weights': ATLASNET_SHA256,
+              'dataset': DATASET, 'fold': FOLD, 'seed': SEED}
+    marker = DATA / '.prepared'
+    if marker.is_file() and marker.stat().st_size:
+        from hf_cache import check_manifest
+        value = check_manifest(json.loads(marker.read_text()), 'preprocessed')
+        record['preprocessed_content_id'] = value['content_id']
+    return record
 
 
 def main():
     DATA.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s',
-                        handlers=[logging.StreamHandler(), logging.FileHandler(DATA / 'train.log')])
+                        handlers=[logging.StreamHandler(), logging.FileHandler(DATA / 'train.log', 'a')])
     import numpy as np
     import torch
     from adrenal_multiorgan import upload
@@ -88,14 +87,14 @@ def main():
 
     if not has_checkpoint():
         fetch_model_from_hugging_face()
-    if (FOLD_FOLDER / 'checkpoint_final.pth').exists() and (FOLD_FOLDER / 'validation/summary.json').exists():
-        log.info('Training and the final validation have already finished; nothing to do.')
-        return
-
     record_path = FOLD_FOLDER / 'run.json'
     if has_checkpoint():
-        if json.loads(record_path.read_text()) != run_record():
-            raise SystemExit(f'The code, plans or split changed since this run started; refusing to continue it. See {record_path}')
+        if not record_path.is_file() or json.loads(record_path.read_text()) != run_record():
+            raise SystemExit(f'The code, plans, split or preprocessing changed; refusing to continue. See {record_path}')
+        # Check compatibility even when training is already finished.
+        if (FOLD_FOLDER / 'checkpoint_final.pth').exists() and (FOLD_FOLDER / 'validation/summary.json').exists():
+            log.info('Training and the final validation have already finished; nothing to do.')
+            return
         log.info('Continuing from the checkpoint in %s', FOLD_FOLDER)
         weights = None
     else:
@@ -103,7 +102,8 @@ def main():
             raise SystemExit(f'{ATLASNET_WEIGHTS} is not the expected AtlasNet checkpoint')
         log.info('Starting a new run from the AtlasNet weights')
         FOLD_FOLDER.mkdir(parents=True, exist_ok=True)
-        record_path.write_text(json.dumps(run_record(), indent=2))
+        from hf_cache import write_json
+        write_json(record_path, run_record())
         weights = str(ATLASNET_WEIGHTS)
 
     random.seed(SEED)

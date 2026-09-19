@@ -114,14 +114,11 @@ class AdrenalMultiorgan(nnUNetTrainerNoMirroring):
 
 
 def upload(model_folder, message):
-    """Upload checkpoints (latest, best, final), logs and settings. Unchanged files are not sent again."""
-    from huggingface_hub import HfApi
+    """Publish an atomic checkpoint/log/settings snapshot with a checksum manifest."""
+    from hf_cache import publish_model
     try:
-        HfApi().create_repo(os.environ['ADRENAL_HF_REPO'], private=True, exist_ok=True)
-        url = HfApi().upload_folder(repo_id=os.environ['ADRENAL_HF_REPO'], folder_path=model_folder,
-                                    path_in_repo=model_folder.name, ignore_patterns=['*.tmp', '*.lock'],
-                                    commit_message=f'{model_folder.name}: {message}')
-        print(f'Uploaded to Hugging Face ({message}): {url}', flush=True)
+        revision = publish_model(Path(model_folder), message)
+        print(f'Uploaded to Hugging Face ({message}), verified snapshot commit: {revision}', flush=True)
     except Exception as error:
-        # The checkpoint is safe on disk and the next upload includes it; an outage must not stop training.
+        # The checkpoint is safe on disk; failed uploads do not replace the last complete remote snapshot.
         print(f'WARNING: Hugging Face upload failed ({message}), training continues: {error!r}', flush=True)
