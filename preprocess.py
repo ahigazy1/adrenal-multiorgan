@@ -5,12 +5,12 @@
 1. nnU-Net's dataset integrity check (every image/label pair: same shape, spacing, orientation; known labels only).
 2. Plans: AtlasNet's plans are transferred with nnU-Net's own move_plans_between_datasets (architecture, 1 mm
    spacing and CT normalization stay AtlasNet's), then the three resampling functions are set to SimpleITK.
-3. nnU-Net's preprocessor on every training scan, its patch-sampling index, and the copy of the labels it validates
+3. nnU-Net's per-case preprocessing function on every training scan, its patch-sampling index, and the copy of the labels it validates
    against. These are the three things nnU-Net's preprocess_dataset() does; they are called one by one because that
    function still imports distutils, which Python 3.12 no longer has.
 4. The AtlasNet checkpoint is downloaded and its checksum verified.
 
-An interrupted run starts again from the beginning of step 3 (nnU-Net's preprocessor clears its output folder).
+An interrupted run continues with the scans that are not finished yet.
 Needs `pip install -e vendor/nnUNet` (or the pixi environment).
 """
 import argparse
@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import zipfile
+from multiprocessing import get_context
 from pathlib import Path
 
 from cohort_scan import sha256
@@ -70,6 +71,13 @@ def fetch_atlasnet_checkpoint(data):
         raise SystemExit(f'{target} is not the expected AtlasNet checkpoint')
 
 
+def preprocess_case(job):
+    from nnunetv2.preprocessing.preprocessors.default_preprocessor import DefaultPreprocessor
+    for leftover in ('.b2nd', '_seg.b2nd'):  # half-written by an interrupted run; blosc2 will not overwrite them
+        Path(job[0] + leftover).unlink(missing_ok=True)
+    DefaultPreprocessor(verbose=False).run_case_save(*job)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--data', required=True, type=Path, help='the folder build_dataset.py wrote into')
@@ -84,17 +92,31 @@ def main():
                         handlers=[logging.StreamHandler(), logging.FileHandler(preprocessed / 'preprocess.log', 'a')])
 
     from nnunetv2.experiment_planning.verify_dataset_integrity import verify_dataset_integrity
-    from nnunetv2.preprocessing.preprocessors.default_preprocessor import DefaultPreprocessor
     from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_dataset
+    from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
+    from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets
 
     log.info('Checking the dataset with nnU-Net')
     verify_dataset_integrity(str(raw), args.workers)
     write_plans(Path(__file__).resolve().parent, preprocessed)
     shutil.copy(raw / 'dataset.json', preprocessed / 'dataset.json')
 
-    log.info('Preprocessing with %d workers', args.workers)
-    DefaultPreprocessor(verbose=False).run(DATASET, '3d_fullres', PLANS, num_processes=args.workers)
-    extract_sampling_locations_dataset(DATASET, PLANS, configurations=('3d_fullres',))
+    # nnU-Net's own per-case function, for every scan that is not finished yet (it writes a case's .pkl last). Its
+    # run() would do the same but clears the folder first, so an interrupted run would lose what it had done.
+    plans_manager = PlansManager(str(preprocessed / f'{PLANS}.json'))
+    configuration = plans_manager.get_configuration('3d_fullres')
+    dataset_json = json.loads((raw / 'dataset.json').read_text())
+    output = preprocessed / configuration.data_identifier
+    output.mkdir(exist_ok=True)
+    cases = get_filenames_of_train_images_and_targets(str(raw), dataset_json)
+    todo = sorted(c for c in cases if not (output / f'{c}.pkl').exists())
+    log.info('Preprocessing %d of %d scans with %d workers', len(todo), len(cases), args.workers)
+    jobs = [(str(output / c), cases[c]['images'], cases[c]['label'], plans_manager, configuration, dataset_json) for c in todo]
+    with get_context('spawn').Pool(args.workers) as pool:  # 'spawn', as nnU-Net does
+        for done, _ in enumerate(pool.imap_unordered(preprocess_case, jobs), 1):
+            if done % 50 == 0 or done == len(jobs):
+                log.info('%d of %d scans preprocessed', done, len(jobs))
+    extract_sampling_locations_dataset(DATASET, PLANS, configurations=('3d_fullres',), num_processes=args.workers)
     shutil.copytree(raw / 'labelsTr', preprocessed / 'gt_segmentations', dirs_exist_ok=True)
 
     fetch_atlasnet_checkpoint(data)
