@@ -31,7 +31,8 @@ gcloud services enable compute.googleapis.com secretmanager.googleapis.com loggi
 # Already created? Then just start it. Its disk lives in one zone, so it can only start there.
 ZONE=$(gcloud compute instances list --filter="name=$NAME" --format="value(zone.basename())")
 if [ -n "$ZONE" ]; then
-    echo "$NAME exists in $ZONE; starting it."
+    echo "$NAME exists in $ZONE; refreshing its startup script and starting it."
+    gcloud compute instances add-metadata "$NAME" --zone="$ZONE" --metadata-from-file=startup-script="$HERE/startup.sh"
     gcloud compute instances start "$NAME" --zone="$ZONE" \
         || { echo "Could not start it. If the message above mentions resources or capacity, $ZONE has no free machine right now: nothing is lost, run this again in an hour."; exit 1; }
     echo "Started. Training continues by itself. Progress: bash $HERE/progress.sh"
