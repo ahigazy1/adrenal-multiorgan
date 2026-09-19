@@ -16,17 +16,18 @@ mkdir -p results
 echo "=== prepare start $(date -u) on $CPUS CPUs, commit $(git rev-parse HEAD)"
 df -h "$DATA" | tail -1
 
-# The four sources are downloaded from Hugging Face at the same time; each is tried up to three times.
-fetch() { for attempt in 1 2 3; do hf download "$@" && return 0; echo "download failed (attempt $attempt): $1"; sleep 20; done; return 1; }
+# The four sources come from Hugging Face, one after the other: downloading them at the same time gets
+# "429 Too Many Requests" from its CDN. Each is tried up to three times, waiting longer each time.
+fetch() { for attempt in 1 2 3; do hf download "$@" && return 0; echo "download failed (attempt $attempt): $1"; sleep $((attempt * 60)); done; return 1; }
 # TotalSegmentator v2.0.1 (CC BY 4.0, https://zenodo.org/records/10047292): our copy of the Zenodo file, checked
 # against the checksum Zenodo publishes.
 TS="$DATA/sources/Totalsegmentator_dataset_v201.zip"
-(fetch ahigazy1/adrenal-multiorgan-cache sources/Totalsegmentator_dataset_v201.zip --repo-type dataset --local-dir "$DATA"     && echo "fe250e5718e0a3b5df4c4ea9d58a62fe  $TS" | md5sum --check) & PIDS="$!"
+fetch ahigazy1/adrenal-multiorgan-cache sources/Totalsegmentator_dataset_v201.zip --repo-type dataset --local-dir "$DATA"
+echo "fe250e5718e0a3b5df4c4ea9d58a62fe  $TS" | md5sum --check
 # AMOS22 CT, BTCV and FLARE22, at pinned revisions
-fetch MedOtter/amos22-ct-dataset --repo-type dataset --revision c67f7c01e66277038d87975b03b73ece489a3035     --include "train/*" --include "valid/*" --local-dir "$DATA/amos" & PIDS="$PIDS $!"
-fetch lingheng123/btcv --repo-type dataset --revision c1728b451a00c054875a0a97d7658d1eaf8362b5     --include "RawData/Training/*" --local-dir "$DATA/btcv" & PIDS="$PIDS $!"
-fetch MedOtter/FLARE22 --repo-type dataset --revision ab0b99b53e2183fe59321b5888867c6c7cb0792a     --include "images/*" --include "labels/*" --local-dir "$DATA/flare" & PIDS="$PIDS $!"
-for PID in $PIDS; do wait "$PID"; done   # any download that failed three times stops the script here
+fetch MedOtter/amos22-ct-dataset --repo-type dataset --revision c67f7c01e66277038d87975b03b73ece489a3035     --include "train/*" --include "valid/*" --local-dir "$DATA/amos"
+fetch lingheng123/btcv --repo-type dataset --revision c1728b451a00c054875a0a97d7658d1eaf8362b5     --include "RawData/Training/*" --local-dir "$DATA/btcv"
+fetch MedOtter/FLARE22 --repo-type dataset --revision ab0b99b53e2183fe59321b5888867c6c7cb0792a     --include "images/*" --include "labels/*" --local-dir "$DATA/flare"
 
 echo "=== scan $(date -u)"
 python cohort_scan.py --out results --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --flare "$DATA/flare" --workers "$CPUS"
