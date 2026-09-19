@@ -91,6 +91,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(preprocessed / 'preprocess.log', 'a')])
 
+    from nnunetv2.experiment_planning.plan_and_preprocess_api import extract_fingerprint_dataset
     from nnunetv2.experiment_planning.verify_dataset_integrity import verify_dataset_integrity
     from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_dataset
     from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
@@ -100,6 +101,11 @@ def main():
     verify_dataset_integrity(str(raw), args.workers)
     write_plans(Path(__file__).resolve().parent, preprocessed)
     shutil.copy(raw / 'dataset.json', preprocessed / 'dataset.json')
+    # nnU-Net's description of the dataset (shapes, spacings, intensities). Planning normally writes it; we reuse
+    # AtlasNet's plans instead of planning, but the trainer still copies this file into the model folder.
+    if not (preprocessed / 'dataset_fingerprint.json').exists():
+        log.info('Extracting the dataset fingerprint with nnU-Net')
+        extract_fingerprint_dataset(int(DATASET[7:10]), num_processes=args.workers, verbose=False)
 
     # nnU-Net's own per-case function, for every scan that is not finished yet (it writes a case's .pkl last). Its
     # run() would do the same but clears the folder first, so an interrupted run would lose what it had done.

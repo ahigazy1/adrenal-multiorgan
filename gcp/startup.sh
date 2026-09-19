@@ -21,6 +21,9 @@ cd /opt
 # Freeze the working checkout after preparation, so an existing experiment cannot silently change.
 [ -d adrenal-multiorgan ] || git clone https://github.com/ahigazy1/adrenal-multiorgan
 cd adrenal-multiorgan
+# Prepared data without nnU-Net's dataset fingerprint is incomplete (training stops on it): prepare again.
+# Downloads and finished scans are kept, so that takes minutes, and the newest code is pulled for it.
+[ -f data/nnUNet_preprocessed/Dataset902_AdrenalMultiorgan/dataset_fingerprint.json ] || rm -f data/.prepared data/.preprocessed-local.json
 if [ ! -f data/.prepared ]; then
     git pull --ff-only origin main
 fi

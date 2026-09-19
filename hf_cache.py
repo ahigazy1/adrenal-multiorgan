@@ -170,7 +170,7 @@ def cache_files(data: Path) -> list[Path]:
     identifiers = json.loads((fg / 'meta.json').read_text())['identifiers']
     if set(identifiers) != train or len(identifiers) != len(train):
         raise RuntimeError('Foreground sampling index is incomplete')
-    required = [pre / f'{PLANS}.json', pre / 'dataset.json', pre / 'splits_final.json',
+    required = [pre / f'{PLANS}.json', pre / 'dataset.json', pre / 'dataset_fingerprint.json', pre / 'splits_final.json',
                 raw / 'dataset.json', raw / 'build_dataset.csv', raw / 'build_dataset.json',
                 data / 'atlas/checkpoint_final.pth']
     required += [fg / n for n in ('locations.b2nd', 'indptr.npy', 'class_id.npy', 'count.npy',
