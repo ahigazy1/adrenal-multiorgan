@@ -89,6 +89,7 @@ def main():
                         handlers=[logging.StreamHandler(), logging.FileHandler(preprocessed / 'preprocess.log', 'a')])
 
     from huggingface_hub import HfApi
+    from nnunetv2.experiment_planning.verify_dataset_integrity import verify_dataset_integrity
     from nnunetv2.preprocessing.preprocessors.default_preprocessor import DefaultPreprocessor
     from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
     from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets
@@ -99,6 +100,9 @@ def main():
             api.upload_folder(repo_id=REPOSITORY, repo_type='dataset', folder_path=folder, path_in_repo=path_in_repo,
                               commit_message=message, **patterns)
 
+    # nnU-Net's own check of every image/label pair (same shape, spacing, orientation; only known label values).
+    # The plan transfer below skips the nnU-Net command that would normally run it.
+    verify_dataset_integrity(str(raw), args.workers)
     plans = write_plans(Path(__file__).resolve().parent, preprocessed)
     # Two things nnU-Net's own preprocessing command does around the per-case work:
     shutil.copy(raw / 'dataset.json', preprocessed / 'dataset.json')

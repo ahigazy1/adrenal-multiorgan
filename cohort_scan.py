@@ -74,9 +74,14 @@ def load_masks(source, case, official_split, folders):
         with zipfile.ZipFile(folders['ts']) as archive:
             def read(structure):
                 return nib.Nifti1Image.from_bytes(gzip.decompress(archive.read(f'{case}/segmentations/{structure}.nii.gz')))
-            masks = {organ: np.any([np.asanyarray(read(s).dataobj) > 0 for s in files], axis=0)
+            images = {s: read(s) for files in TS_FILES.values() for s in files}
+            reference = images['liver']
+            for structure, image in images.items():  # every mask must sit on the same grid
+                if image.shape != reference.shape or not np.allclose(image.affine, reference.affine, atol=1e-3):
+                    raise ValueError(f'{structure} is on a different grid than liver')
+            masks = {organ: np.any([np.asanyarray(images[s].dataobj) > 0 for s in files], axis=0)
                      for organ, files in TS_FILES.items()}
-            return read('liver'), masks
+            return reference, masks
     image = nib.load(label_path(source, case, official_split, folders))
     labels = np.asanyarray(image.dataobj)
     return image, {organ: labels == value for organ, value in LABEL_IDS[source].items()}

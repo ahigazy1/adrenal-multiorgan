@@ -83,7 +83,8 @@ def build_case(job):
         else:
             image_bytes = image_path(source, case, row['official_split'], folders).read_bytes()
 
-        # The CT and its labels must describe the same grid.
+        # The CT and its labels must describe the same grid. The label file is then written with the CT's own
+        # affine, so a reader that reorients by header (nnU-Net's NibabelIOWithReorient) treats both identically.
         image = nib.Nifti1Image.from_bytes(gzip.decompress(image_bytes))
         if image.shape[:3] != reference.shape[:3] or not np.allclose(image.affine, reference.affine, atol=1e-3):
             raise ValueError(f'image grid {image.shape} and label grid {reference.shape} differ')
@@ -105,7 +106,7 @@ def build_case(job):
 
         header = reference.header.copy()
         header.set_data_dtype(np.uint8)
-        nib.save(nib.Nifti1Image(labels, reference.affine, header), label_out)
+        nib.save(nib.Nifti1Image(labels, image.affine, header), label_out)
         image_out.write_bytes(image_bytes)
         return {'name': name, 'source': source, 'case': case, 'role': role,
                 'speckle_removed_left_ml': removed_ml['adrenal_left'],
