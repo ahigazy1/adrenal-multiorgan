@@ -91,6 +91,7 @@ class CacheTests(unittest.TestCase):
             self.file(name, json.dumps(value).encode())
         dataset = {'numTraining': 2}
         js(pre + '/dataset.json', dataset)
+        js(pre + '/dataset_fingerprint.json', {'spacings': [[1, 1, 1]]})
         js(raw + '/dataset.json', dataset)
         js(pre + '/AtlasNetPlans.json', {'configurations': {'3d_fullres': {'data_identifier': 'AtlasNetPlans_3d_fullres'}}})
         js(pre + '/splits_final.json', [{'train': ['a'], 'val': ['b']}] * 5)
