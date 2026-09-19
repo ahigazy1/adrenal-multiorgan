@@ -7,9 +7,8 @@ into nnUNet_raw/Dataset902_AdrenalMultiorgan, as imagesTr/labelsTr (training) or
 (held-out test), plus dataset.json, splits_final.json (fold 0) and build_dataset.csv (one row per case).
 
 Who goes where:
-  test        TotalSegmentator's official test split, AMOS's official validation set, 6 fixed BTCV scans
-  validation  a seeded random 20% of the remaining scans of each source (used only to monitor training)
-  train       everything else
+  test             TotalSegmentator's official test split, AMOS's official validation set, 6 fixed BTCV scans
+  train/validation everything else, divided by nnU-Net's own default split (5 folds, seed 12345); fold 0 is used
 
 Each case is re-judged with step 1's rule and must get step 1's decision, so the two steps cannot drift apart.
 
@@ -21,7 +20,7 @@ import csv
 import gzip
 import json
 import logging
-import random
+import sys
 import zipfile
 from multiprocessing import Pool
 from pathlib import Path
@@ -30,7 +29,10 @@ import nibabel as nib
 import numpy as np
 from scipy import ndimage
 
-from cohort_scan import AMOS_IDS, BTCV_IDS, GLANDS, TS_FILES, judge_gland, sha256, voxel_volume_ml
+from cohort_scan import GLANDS, judge_gland, load_masks, sha256, voxel_volume_ml, write_csv
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'vendor/nnUNet'))
+from nnunetv2.utilities.crossval_split import generate_crossval_split
 
 DATASET = 'Dataset902_AdrenalMultiorgan'
 # Label values in the written files. Adrenals are written last so they win where TotalSegmentator masks overlap.
@@ -38,9 +40,7 @@ LABELS = {'background': 0, 'adrenal_left': 1, 'adrenal_right': 2, 'kidney_left':
           'liver': 5, 'spleen': 6, 'aorta': 7, 'inferior_vena_cava': 8, 'pancreas': 9}
 WRITE_ORDER = ['liver', 'spleen', 'kidney_left', 'kidney_right', 'aorta', 'inferior_vena_cava', 'pancreas',
                'adrenal_left', 'adrenal_right']
-BTCV_TEST = {'label0001', 'label0004', 'label0008', 'label0009', 'label0031', 'label0034'}  # as in the pilot study
-VALIDATION_FRACTION = 0.2
-SEED = 42
+BTCV_TEST = {'label0001', 'label0004', 'label0008', 'label0009', 'label0031', 'label0034'}  # fixed list
 
 log = logging.getLogger('build_dataset')
 
@@ -52,38 +52,26 @@ def largest_component(mask):
     return components == 1 + np.argmax(np.bincount(components.ravel())[1:])
 
 
+def image_path(source, case, official_split, folders):
+    if source == 'amos':
+        return folders['amos'] / ('train/imagesTr' if official_split == 'train' else 'valid/imagesVa') / f'{case}.nii.gz'
+    return folders['btcv'] / 'RawData/Training/img' / f"{case.replace('label', 'img')}.nii.gz"
+
+
 def build_case(job):
-    row, role, sources, out = job
+    row, role, folders, out = job
     source, case = row['source'], row['case']
-    name = f'{source}_{case}'
+    name = case if case.startswith(source) else f'{source}_{case}'  # ts_s0001, amos_0001, btcv_label0001
     suffix = 'Ts' if role == 'test' else 'Tr'
     image_out = out / f'images{suffix}' / f'{name}_0000.nii.gz'
     label_out = out / f'labels{suffix}' / f'{name}.nii.gz'
     try:
+        reference, masks = load_masks(source, case, row['official_split'], folders)
         if source == 'ts':
-            with zipfile.ZipFile(sources['ts']) as archive:
-                def read(structure):
-                    data = gzip.decompress(archive.read(f'{case}/segmentations/{structure}.nii.gz'))
-                    return nib.Nifti1Image.from_bytes(data)
-                reference = read('liver')
-                masks = {organ: np.any([np.asanyarray(read(s).dataobj) > 0 for s in files], axis=0)
-                         for organ, files in TS_FILES.items()}
+            with zipfile.ZipFile(folders['ts']) as archive:
                 image_bytes = archive.read(f'{case}/ct.nii.gz')
         else:
-            if source == 'amos':
-                folder = 'train' if row['official_split'] == 'train' else 'valid'
-                end = 'Tr' if folder == 'train' else 'Va'
-                label_path = sources['amos'] / folder / f'labels{end}' / f'{case}.nii.gz'
-                image_path = sources['amos'] / folder / f'images{end}' / f'{case}.nii.gz'
-                ids = AMOS_IDS
-            else:
-                label_path = sources['btcv'] / 'RawData/Training/label' / f'{case}.nii.gz'
-                image_path = sources['btcv'] / 'RawData/Training/img' / f"{case.replace('label', 'img')}.nii.gz"
-                ids = BTCV_IDS
-            reference = nib.load(label_path)
-            original = np.asanyarray(reference.dataobj)
-            masks = {organ: original == ids[organ] for organ in LABELS if organ != 'background'}
-            image_bytes = image_path.read_bytes()
+            image_bytes = image_path(source, case, row['official_split'], folders).read_bytes()
 
         # The CT and its labels must describe the same grid.
         image = nib.Nifti1Image.from_bytes(gzip.decompress(image_bytes))
@@ -120,24 +108,12 @@ def build_case(job):
         return {'name': name, 'source': source, 'case': case, 'role': 'failed', 'error': repr(error)}
 
 
-def assign_roles(rows):
-    """Test sets are fixed by the datasets themselves; validation is a seeded 20% of the rest, per source."""
-    roles = {}
-    for source in ('ts', 'amos', 'btcv'):
-        rest = []
-        for row in (r for r in rows if r['source'] == source):
-            is_test = (row['official_split'] == 'test' if source == 'ts' else
-                       row['official_split'] == 'val' if source == 'amos' else row['case'] in BTCV_TEST)
-            if is_test:
-                roles[source, row['case']] = 'test'
-            else:
-                rest.append(row['case'])
-        rest.sort()
-        random.Random(SEED).shuffle(rest)
-        cut = round(len(rest) * VALIDATION_FRACTION)
-        roles |= {(source, case): 'validation' for case in rest[:cut]}
-        roles |= {(source, case): 'train' for case in rest[cut:]}
-    return roles
+def is_test(row):
+    if row['source'] == 'ts':
+        return row['official_split'] == 'test'
+    if row['source'] == 'amos':
+        return row['official_split'] == 'val'
+    return row['case'] in BTCV_TEST
 
 
 def main():
@@ -157,18 +133,17 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(raw / 'build_dataset.log', 'w')])
 
-    sources = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv}
+    folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv}
     scanned = list(csv.DictReader(open(args.scan)))
-    kept = [r for r in scanned if r['scan'].startswith('kept') and sources[r['source']]]
+    kept = [r for r in scanned if r['scan'].startswith('kept') and folders[r['source']]]
     log.info('%d scanned, %d kept by step 1 from the sources given, %d excluded or failed there',
              len(scanned), len(kept), len(scanned) - len(kept))
-    roles = assign_roles(kept)  # before --limit, so a test run gives each case the role it has in the full run
     if args.limit:
-        kept = [r for s in sources for r in [k for k in kept if k['source'] == s][:args.limit]]
+        kept = [r for s in folders for r in [k for k in kept if k['source'] == s][:args.limit]]
 
     rows = []
     with Pool(args.workers) as pool:
-        jobs = [(r, roles[r['source'], r['case']], sources, raw) for r in kept]
+        jobs = [(r, 'test' if is_test(r) else 'train', folders, raw) for r in kept]
         for row in pool.imap_unordered(build_case, jobs, chunksize=4):
             rows.append(row)
             if row['error']:
@@ -177,28 +152,25 @@ def main():
                 log.info('%d of %d cases written', len(rows), len(kept))
     rows.sort(key=lambda r: r['name'])
 
-    columns = list(dict.fromkeys(key for row in rows for key in row))
-    with open(raw / 'build_dataset.csv', 'w', newline='') as stream:
-        writer = csv.DictWriter(stream, columns, restval='')
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(raw / 'build_dataset.csv', rows)
 
-    names = {role: [r['name'] for r in rows if r['role'] == role] for role in ('train', 'validation', 'test', 'failed')}
+    names = {role: [r['name'] for r in rows if r['role'] == role] for role in ('train', 'test', 'failed')}
     (raw / 'dataset.json').write_text(json.dumps({
-        'channel_names': {'0': 'CT'}, 'labels': LABELS, 'file_ending': '.nii.gz',
+        'channel_names': {'0': 'CT'}, 'labels': LABELS, 'file_ending': '.nii.gz', 'numTraining': len(names['train']),
         # AtlasNet's reader. Also needed because some TotalSegmentator CTs have orientation matrices that are
         # skewed by about 1e-4, which the default SimpleITK reader refuses to open.
-        'overwrite_image_reader_writer': 'NibabelIOWithReorient',
-        'numTraining': len(names['train']) + len(names['validation'])}, indent=2))
+        'overwrite_image_reader_writer': 'NibabelIOWithReorient'}, indent=2))
+    # The split nnU-Net would create by itself at the first training run, written now so it is part of the dataset.
+    splits = generate_crossval_split(names['train'])
     preprocessed = args.out / 'nnUNet_preprocessed' / DATASET
     preprocessed.mkdir(parents=True, exist_ok=True)
-    (preprocessed / 'splits_final.json').write_text(json.dumps(
-        [{'train': names['train'], 'val': names['validation']}], indent=2))  # nnU-Net reads entry 0 as fold 0
+    (preprocessed / 'splits_final.json').write_text(json.dumps(splits, indent=2))
+    log.info('Fold 0: %d training and %d validation cases', len(splits[0]['train']), len(splits[0]['val']))
 
     for source in ('ts', 'amos', 'btcv'):
         log.info('%-5s ' + '  '.join(f'{role} %4d' for role in names), source,
                  *[sum(r['source'] == source and r['role'] == role for r in rows) for role in names])
-    record = {'scan_csv_sha256': sha256(args.scan), 'seed': SEED, 'validation_fraction': VALIDATION_FRACTION,
+    record = {'scan_csv_sha256': sha256(args.scan), 'split': 'nnU-Net default: 5 folds, seed 12345',
               'labels': LABELS, 'counts': {role: len(n) for role, n in names.items()},
               'build_dataset_csv_sha256': sha256(raw / 'build_dataset.csv')}
     (raw / 'build_dataset.json').write_text(json.dumps(record, indent=2))
@@ -213,14 +185,8 @@ def self_check():
     gland[10, 10, 10] = True  # speckle
     cleaned = largest_component(gland)
     assert cleaned.sum() == 125 and not cleaned[10, 10, 10]
-    rows = [{'source': 'ts', 'case': f's{i:04}', 'official_split': 'test' if i < 10 else 'train'} for i in range(110)]
-    rows += [{'source': 'btcv', 'case': f'label{i:04}', 'official_split': 'train'} for i in range(1, 11)]
-    roles = assign_roles(rows)
-    count = lambda source, role: sum(r == role for (s, _), r in roles.items() if s == source)
-    assert (count('ts', 'test'), count('ts', 'validation'), count('ts', 'train')) == (10, 20, 80)
-    assert (count('btcv', 'test'), count('btcv', 'validation'), count('btcv', 'train')) == (4, 1, 5)
-    assert roles == assign_roles(rows[::-1])  # the split does not depend on input order
-
+    assert is_test({'source': 'btcv', 'case': 'label0004'}) and not is_test({'source': 'btcv', 'case': 'label0002'})
+    assert is_test({'source': 'amos', 'official_split': 'val'}) and not is_test({'source': 'ts', 'official_split': 'val'})
 
 if __name__ == '__main__':
     self_check()

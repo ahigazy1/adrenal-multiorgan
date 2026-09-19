@@ -1,10 +1,10 @@
 # Specification
 
-Last updated September 19, 2026. Status: steps 1, 2 and 4 are written and checked on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
+Last updated September 19, 2026. Status: steps 1, 2, 4 and 5 are written and checked on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
 
 ## Setup
 
-Data preparation (download, cleaning, preprocessing, publishing the cache to Hugging Face) runs on a Google Colab runtime. Training runs on one cloud VM with an NVIDIA RTX PRO 6000 (96 GB) and 48 vCPUs. The person starting the training is not a programmer, so training is a single command that decides by itself whether to start or continue, and the VM may be interrupted at any time.
+Data preparation (download, cleaning, preprocessing, publishing the cache to Hugging Face) runs on a Google Colab runtime. Training runs on one cloud VM with an NVIDIA RTX PRO 6000 (96 GB) and 48 vCPUs. Training is a single command that starts or continues by itself, because the VM may be interrupted at any time.
 
 ## Decided
 
@@ -23,7 +23,7 @@ Data preparation (download, cleaning, preprocessing, publishing the cache to Hug
 | Loss | cross-entropy + focal Tversky (false negatives 0.6, false positives 0.4, exponent 0.75), deep supervision |
 | Resampling | SimpleITK for both: `resample_data_or_seg_to_shape_sitk` prepares CT and labels for the training cache and CT at inference; `resample_logits_to_shape_sitk` brings the network output back to the original grid |
 | Image reader | nnU-Net's `NibabelIOWithReorient`, as in AtlasNet's plans |
-| Validation set | seeded random 20% of the non-test scans of each source; used for monitoring and for choosing the best checkpoint |
+| Train/validation split | nnU-Net's default (5 folds, seed 12345) over all non-test scans, fold 0; validation is used for monitoring and for choosing the best checkpoint |
 | Checkpoints | every 100 epochs, plus the best (by nnU-Net's validation Dice moving average); uploaded to Hugging Face every 100 epochs |
 
 ### Adrenal label cleaning rule
@@ -40,7 +40,7 @@ Excluding the whole scan (rather than masking one gland) keeps the rule one sent
 
 ### Learning-rate schedule: why this one
 
-It is nnU-Net's own fine-tuning recipe, unchanged (`PretrainedTrainer` and `nnUNetTrainer_warmup` in the vendored code: SGD, peak 1e-3 when pretrained weights are loaded versus 1e-2 from scratch, 50 warmup epochs, offset polynomial decay). Not chosen: a higher peak (in 100-epoch pilot runs 5e-3 was ahead of 1e-3 only within single-run noise, and the reason for it, too few updates, does not apply to 2000 epochs); scaling the rate with batch size (nnU-Net never does); cosine schedules, restarts, layer-wise rates or freezing (not standard in nnU-Net, no evidence they are needed).
+It is nnU-Net's own fine-tuning recipe, unchanged (`PretrainedTrainer` and `nnUNetTrainer_warmup` in the vendored code: SGD, peak 1e-3 when pretrained weights are loaded versus 1e-2 from scratch, 50 warmup epochs, offset polynomial decay). Not chosen: a higher peak (in preliminary 100-epoch runs 5e-3 was ahead of 1e-3 only within single-run noise, and the reason for it, too few updates, does not apply to 2000 epochs); scaling the rate with batch size (nnU-Net never does); cosine schedules, restarts, layer-wise rates or freezing (not standard in nnU-Net, no evidence they are needed).
 
 ### Held-out test set
 
@@ -83,8 +83,7 @@ About one in seven TotalSegmentator CTs in a local sample has an orientation mat
 
 ## Work items
 
-1. Run `colab_scan.sh` on Colab: final inclusion table and counts.
-2. Run `colab_build.sh` on Colab: the cleaned dataset and split.
-3. Step 3 script: preprocess on Colab with resumable shards; publish cache and manifest to Hugging Face.
-4. Five-epoch timing test of `train.py` on the GPU VM, then the full run.
-5. Evaluation script for the held-out test set (Dice, surface Dice, signed and absolute volume error).
+1. Run `colab_prepare.sh` on Colab: final inclusion table, the cleaned dataset and the split.
+2. Step 3 script: transfer AtlasNet's plans with nnU-Net's `nnUNetv2_move_plans_between_datasets`, set the SimpleITK resamplers, preprocess on Colab, publish the cache to Hugging Face.
+3. Five-epoch timing test of `train.py` on the GPU VM, then the full run, then `predict.py`.
+4. Add surface Dice and signed/absolute volume error to the evaluation (`predict.py` currently reports nnU-Net's Dice and voxel counts).

@@ -4,7 +4,7 @@ Differences from stock nnUNetTrainer, each chosen in PLAN.md:
   - batch size 4, 2000 epochs
   - fine-tuning schedule from nnU-Net's own PretrainedTrainer: SGD, peak LR 1e-3,
     50 epochs of linear warmup, then polynomial decay (exponent 0.9)
-  - no mirroring, in training or inference
+  - no mirroring, in training or inference (nnU-Net's own nnUNetTrainerNoMirroring)
   - reduced augmentation: no blur, noise or simulated low resolution; mild rotation and scaling
   - the Dice term of the loss is replaced by focal Tversky (false negatives 0.6, false positives 0.4);
     cross-entropy and deep supervision are unchanged
@@ -25,6 +25,7 @@ from batchgeneratorsv2.transforms.noise.gaussian_blur import GaussianBlurTransfo
 from batchgeneratorsv2.transforms.spatial.low_resolution import SimulateLowResolutionTransform
 from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+from nnunetv2.training.nnUNetTrainer.variants.data_augmentation.nnUNetTrainerNoMirroring import nnUNetTrainerNoMirroring
 
 BATCH_SIZE = 4
 EPOCHS = 2000
@@ -67,7 +68,7 @@ class FocalTverskyLoss(nn.Module):
         return (error / (true_positive + error + SMOOTH) + 1e-7).pow(FOCAL_EXPONENT).mean()
 
 
-class AdrenalMultiorgan(nnUNetTrainer):
+class AdrenalMultiorgan(nnUNetTrainerNoMirroring):
     def __init__(self, plans, configuration, fold, dataset_json, device=torch.device('cuda')):
         plans = deepcopy(plans)
         plans['configurations'][configuration]['batch_size'] = BATCH_SIZE
@@ -80,11 +81,6 @@ class AdrenalMultiorgan(nnUNetTrainer):
         optimizer, _ = super().configure_optimizers()
         # nnU-Net calls scheduler.step(epoch) with the absolute epoch, so this also holds after a resume.
         return optimizer, LambdaLR(optimizer, learning_rate_factor)
-
-    def configure_rotation_dummyDA_mirroring_and_inital_patch_size(self):
-        rotation, dummy_2d, initial_patch_size, _ = super().configure_rotation_dummyDA_mirroring_and_inital_patch_size()
-        self.inference_allowed_mirroring_axes = None
-        return rotation, dummy_2d, initial_patch_size, None
 
     @staticmethod
     def get_training_transforms(*args, **kwargs):

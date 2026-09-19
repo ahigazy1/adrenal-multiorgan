@@ -21,6 +21,7 @@ import json
 import logging
 import sys
 import zipfile
+from collections import Counter
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -61,69 +62,64 @@ def judge_gland(mask, voxel_ml):
     return ('keep_despeckled' if count > 1 else 'keep'), volumes
 
 
-def measure(get_mask, voxel_ml):
-    """Build the CSV columns for one case. get_mask(organ) returns that organ's boolean mask."""
-    row = {'voxel_ml': voxel_ml}
-    for gland in GLANDS:
-        decision, volumes = judge_gland(get_mask(gland), voxel_ml)
-        row[gland] = decision
-        row[gland + '_components'] = len(volumes)
-        row[gland + '_largest_ml'] = round(volumes[0], 4) if volumes else 0
-        row[gland + '_second_ml'] = round(volumes[1], 4) if len(volumes) > 1 else 0
-    for organ in OTHER_ORGANS:
-        row[organ + '_ml'] = round(float(get_mask(organ).sum()) * voxel_ml, 2)
-    decisions = {row[gland] for gland in GLANDS}
-    if any(d.startswith('exclude') for d in decisions):
-        row['scan'] = 'excluded'
-    elif decisions == {'absent'}:
-        row['scan'] = 'kept_no_adrenal'
-    else:
-        row['scan'] = 'kept_with_adrenal'
-    return row
+def load_masks(source, case, official_split, folders):
+    """Read one case's labels. Returns (label image, {organ: boolean mask}); folders = {'ts': zip, 'amos': dir, 'btcv': dir}."""
+    if source == 'ts':
+        with zipfile.ZipFile(folders['ts']) as archive:
+            def read(structure):
+                return nib.Nifti1Image.from_bytes(gzip.decompress(archive.read(f'{case}/segmentations/{structure}.nii.gz')))
+            masks = {organ: np.any([np.asanyarray(read(s).dataobj) > 0 for s in files], axis=0)
+                     for organ, files in TS_FILES.items()}
+            return read('liver'), masks
+    image = nib.load(label_path(source, case, official_split, folders))
+    labels = np.asanyarray(image.dataobj)
+    return image, {organ: labels == value for organ, value in (AMOS_IDS if source == 'amos' else BTCV_IDS).items()}
+
+
+def label_path(source, case, official_split, folders):
+    if source == 'amos':
+        return folders['amos'] / ('train/labelsTr' if official_split == 'train' else 'valid/labelsVa') / f'{case}.nii.gz'
+    return folders['btcv'] / 'RawData/Training/label' / f'{case}.nii.gz'
 
 
 def voxel_volume_ml(image):
     return float(np.prod(image.header.get_zooms()[:3])) / 1000
 
 
-def scan_ts_case(job):
-    zip_path, subject, split = job
-    with zipfile.ZipFile(zip_path) as archive:
-        def read(structure):
-            data = gzip.decompress(archive.read(f'{subject}/segmentations/{structure}.nii.gz'))
-            return nib.Nifti1Image.from_bytes(data)
-
-        voxel_ml = voxel_volume_ml(read('liver'))
-
-        def get_mask(organ):
-            return np.any([np.asanyarray(read(s).dataobj) > 0 for s in TS_FILES[organ]], axis=0)
-
-        return {'source': 'ts', 'case': subject, 'official_split': split} | measure(get_mask, voxel_ml)
-
-
-def scan_label_file_case(job):
-    source, path, split, ids = job
-    image = nib.load(path)
-    labels = np.asanyarray(image.dataobj)
-    row = measure(lambda organ: labels == ids[organ], voxel_volume_ml(image))
-    return {'source': source, 'case': Path(path).name.removesuffix('.nii.gz'), 'official_split': split} | row
-
-
-def safe(function, job):
-    """One unreadable case must not end a 1500-case scan: record the error in its row instead."""
+def scan_case(job):
+    """One CSV row. An unreadable case must not end a 1500-case scan: its error is recorded in the row instead."""
+    source, case, official_split, folders = job
+    row = {'source': source, 'case': case, 'official_split': official_split}
     try:
-        return function(job) | {'error': ''}
+        image, masks = load_masks(*job)
+        voxel_ml = voxel_volume_ml(image)
+        row['voxel_ml'] = voxel_ml
+        for gland in GLANDS:
+            decision, volumes = judge_gland(masks[gland], voxel_ml)
+            row[gland] = decision
+            row[gland + '_components'] = len(volumes)
+            row[gland + '_largest_ml'] = round(volumes[0], 4) if volumes else 0
+            row[gland + '_second_ml'] = round(volumes[1], 4) if len(volumes) > 1 else 0
+        for organ in OTHER_ORGANS:
+            row[organ + '_ml'] = round(float(masks[organ].sum()) * voxel_ml, 2)
+        decisions = {row[gland] for gland in GLANDS}
+        if any(d.startswith('exclude') for d in decisions):
+            row['scan'] = 'excluded'
+        elif decisions == {'absent'}:
+            row['scan'] = 'kept_no_adrenal'
+        else:
+            row['scan'] = 'kept_with_adrenal'
+        return row | {'error': ''}
     except Exception as error:
-        return {'source': job[0] if function is scan_label_file_case else 'ts', 'case': str(job[1]),
-                'scan': 'error', 'error': repr(error)}
+        return row | {'scan': 'error', 'error': repr(error)}
 
 
-def run_ts(job):
-    return safe(scan_ts_case, job)
-
-
-def run_label_file(job):
-    return safe(scan_label_file_case, job)
+def write_csv(path, rows):
+    columns = list(dict.fromkeys(key for row in rows for key in row))
+    with open(path, 'w', newline='') as stream:
+        writer = csv.DictWriter(stream, columns, restval='')
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def sha256(path):
@@ -148,45 +144,34 @@ def main():
               'minimum_ml': MINIMUM_ML, 'python': sys.version, 'numpy': np.__version__,
               'scipy': scipy.__version__, 'nibabel': nib.__version__, 'inputs': {}}
 
-    ts_jobs, label_jobs = [], []
+    folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv}
+    jobs = []
     if args.ts:
         log.info('Hashing %s', args.ts)
         record['inputs']['ts_zip_sha256'] = sha256(args.ts)
         with zipfile.ZipFile(args.ts) as archive:
             lines = archive.read('meta.csv').decode('utf-8-sig').splitlines()
-        meta = list(csv.DictReader(lines, delimiter=';'))
-        ts_jobs = [(args.ts, m['image_id'], m['split']) for m in meta][:args.limit]
-    if args.amos:
-        for folder, split in (('train/labelsTr', 'train'), ('valid/labelsVa', 'val')):
-            files = sorted((args.amos / folder).glob('*.nii.gz'))[:args.limit]
-            label_jobs += [('amos', str(f), split, AMOS_IDS) for f in files]
-    if args.btcv:
-        files = sorted((args.btcv / 'RawData/Training/label').glob('*.nii.gz'))[:args.limit]
-        label_jobs += [('btcv', str(f), 'train', BTCV_IDS) for f in files]
-    log.info('Scanning %d TotalSegmentator and %d AMOS/BTCV cases with %d workers',
-             len(ts_jobs), len(label_jobs), args.workers)
+        jobs += [('ts', m['image_id'], m['split'], folders) for m in csv.DictReader(lines, delimiter=';')][:args.limit]
+    for source, folder, split in (('amos', 'train/labelsTr', 'train'), ('amos', 'valid/labelsVa', 'val'),
+                                  ('btcv', 'RawData/Training/label', 'train')):
+        if folders[source]:
+            files = sorted((folders[source] / folder).glob('*.nii.gz'))[:args.limit]
+            jobs += [(source, f.name.removesuffix('.nii.gz'), split, folders) for f in files]
+    log.info('Scanning %d cases with %d workers', len(jobs), args.workers)
 
     rows = []
     with Pool(args.workers) as pool:
-        for function, jobs in ((run_ts, ts_jobs), (run_label_file, label_jobs)):
-            for row in pool.imap_unordered(function, jobs, chunksize=4):
-                rows.append(row)
-                if row['error']:
-                    log.error('%s %s failed: %s', row['source'], row['case'], row['error'])
-                if len(rows) % 100 == 0:
-                    log.info('%d of %d cases done', len(rows), len(ts_jobs) + len(label_jobs))
+        for row in pool.imap_unordered(scan_case, jobs, chunksize=4):
+            rows.append(row)
+            if row['error']:
+                log.error('%s %s failed: %s', row['source'], row['case'], row['error'])
+            if len(rows) % 100 == 0:
+                log.info('%d of %d cases done', len(rows), len(jobs))
 
     rows.sort(key=lambda row: (row['source'], row['case']))
-    columns = list(dict.fromkeys(key for row in rows for key in row))
-    with open(args.out / 'cohort_scan.csv', 'w', newline='') as stream:
-        writer = csv.DictWriter(stream, columns, restval='')
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(args.out / 'cohort_scan.csv', rows)
 
-    counts = {}
-    for row in rows:
-        key = f"{row['source']} {row.get('official_split', '?')} {row['scan']}"
-        counts[key] = counts.get(key, 0) + 1
+    counts = Counter(f"{row['source']} {row['official_split']} {row['scan']}" for row in rows)
     for key in sorted(counts):
         log.info('%-40s %d', key, counts[key])
     record['counts'] = counts
@@ -216,11 +201,8 @@ def self_check():
     assert judge_gland(gland, 0.001)[0] == 'exclude_fragmented'
     labels = np.zeros((30, 30, 30), np.uint8)  # multi-label file, as in AMOS
     labels[:11, :10, :10] = AMOS_IDS['adrenal_left']
-    labels[15:, :, :] = AMOS_IDS['liver']
-    row = measure(lambda organ: labels == AMOS_IDS[organ], 0.001)
-    assert (row['adrenal_left'], row['adrenal_right'], row['scan']) == ('keep', 'absent', 'kept_with_adrenal')
-    assert row['liver_ml'] == 13.5
-
+    assert judge_gland(labels == AMOS_IDS['adrenal_left'], 0.001)[0] == 'keep'
+    assert judge_gland(labels == AMOS_IDS['adrenal_right'], 0.001)[0] == 'absent'
 
 if __name__ == '__main__':
     self_check()

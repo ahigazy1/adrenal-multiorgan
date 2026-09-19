@@ -71,7 +71,7 @@ assert not set(kinds) & {GaussianNoiseTransform, GaussianBlurTransform, Simulate
 # Checkpoints: written under the final name only (no leftover .tmp), and an upload is attempted at epoch 100, not 99.
 # (nnU-Net's own save and logging are replaced by stand-ins: building the real network needs the dataset.)
 import adrenal_multiorgan
-nnUNetTrainer = AdrenalMultiorgan.__mro__[1]
+from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 nnUNetTrainer.save_checkpoint = lambda self, filename: Path(filename).write_text('weights')
 checkpoint = os.path.join(scratch, 'checkpoint_latest.pth')
 trainer.save_checkpoint(checkpoint)

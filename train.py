@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import random
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -35,8 +36,10 @@ os.environ['nnUNet_raw'] = str(DATA / 'nnUNet_raw')
 os.environ['nnUNet_preprocessed'] = str(DATA / 'nnUNet_preprocessed')
 os.environ['nnUNet_results'] = str(DATA / 'nnUNet_results')
 os.environ['nnUNet_extTrainer'] = str(ROOT / 'trainers')
+sys.path.insert(0, str(ROOT / 'trainers'))
 os.environ.setdefault('nnUNet_compile', 'true')
 os.environ['MPLBACKEND'] = 'Agg'
+os.environ.setdefault('HF_XET_HIGH_PERFORMANCE', '1')  # faster Hugging Face transfers
 
 MODEL_FOLDER = DATA / 'nnUNet_results' / DATASET / f'{TRAINER}__{PLANS}__{CONFIGURATION}'
 FOLD_FOLDER = MODEL_FOLDER / f'fold_{FOLD}'
@@ -50,6 +53,16 @@ def sha256(path):
 
 def has_checkpoint():
     return any(FOLD_FOLDER.glob('checkpoint_*.pth'))
+
+
+def fetch_model_from_hugging_face():
+    from huggingface_hub import snapshot_download
+    log.info('No checkpoint on this disk; looking on Hugging Face (%s)', os.environ['ADRENAL_HF_REPO'])
+    try:
+        snapshot_download(os.environ['ADRENAL_HF_REPO'], local_dir=DATA / 'nnUNet_results' / DATASET,
+                          allow_patterns=[f'{MODEL_FOLDER.name}/*'])
+    except Exception as error:  # a repository that does not exist yet simply means a first start
+        log.info('Nothing downloaded: %r', error)
 
 
 def run_record():
@@ -66,19 +79,14 @@ def main():
                         handlers=[logging.StreamHandler(), logging.FileHandler(DATA / 'train.log')])
     import numpy as np
     import torch
-    from huggingface_hub import snapshot_download
+    from adrenal_multiorgan import upload
     from nnunetv2.run.run_training import run_training
     if not torch.cuda.is_available():
         raise SystemExit('No CUDA GPU found. Training needs the GPU machine.')
     log.info('GPU: %s, torch %s', torch.cuda.get_device_name(), torch.__version__)
 
     if not has_checkpoint():
-        log.info('No checkpoint on this disk; looking on Hugging Face (%s)', os.environ['ADRENAL_HF_REPO'])
-        try:
-            snapshot_download(os.environ['ADRENAL_HF_REPO'], local_dir=DATA / 'nnUNet_results' / DATASET,
-                              allow_patterns=[f'{MODEL_FOLDER.name}/*'])
-        except Exception as error:  # a repository that does not exist yet simply means a first start
-            log.info('Nothing downloaded: %r', error)
+        fetch_model_from_hugging_face()
 
     record_path = FOLD_FOLDER / 'run.json'
     if has_checkpoint():
@@ -100,9 +108,6 @@ def main():
     run_training(DATASET, CONFIGURATION, FOLD, TRAINER, PLANS, pretrained_weights=weights,
                  continue_training=weights is None, device=torch.device('cuda'))
 
-    import sys
-    sys.path.insert(0, str(ROOT / 'trainers'))
-    from adrenal_multiorgan import upload
     upload(MODEL_FOLDER, 'training and final validation finished')
     log.info('Finished.')
 
