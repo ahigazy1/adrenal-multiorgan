@@ -15,7 +15,7 @@
 # The disk is billed while it exists, even when the machine is stopped: run delete_vm.sh when the work is done.
 set -euo pipefail
 NAME=adrenal-train
-DISK_GB=500          # the training cache is about 200 GB
+DISK_GB=500          # downloads about 40 GB, cleaned dataset about 40 GB, preprocessed data about 200 GB
 DISK_IOPS=10000      # disk speed as in our test runs; it is a large part of the disk's price
 DISK_MB_PER_S=1050
 IMAGE="image-family=ubuntu-pro-accel-2604-amd64-nvidia-595,image-project=ubuntu-os-accelerator-images"
@@ -35,8 +35,9 @@ if [ -n "$ZONE" ]; then
     exit 0
 fi
 
-# The Hugging Face token (needs read access to the cache and write access to the model repository) is kept in
-# Secret Manager, not on the disk and not in this repository.
+# The Hugging Face token (read access to ahigazy1/adrenal-multiorgan-cache, write access to
+# ahigazy1/adrenal-multiorgan-model) is kept in Secret Manager under the name HF_TOKEN, not on the disk and not in
+# this repository. If the secret already exists it is used as it is.
 if ! gcloud secrets describe HF_TOKEN >/dev/null 2>&1; then
     read -r -s -p "Paste the Hugging Face token, then press Enter (nothing is shown while you paste): " TOKEN; echo
     printf %s "$TOKEN" | gcloud secrets create HF_TOKEN --data-file=-
@@ -60,7 +61,7 @@ for ZONE in $ZONES; do
         --service-account="$ACCOUNT" --scopes=cloud-platform \
         --metadata=serial-port-logging-enable=true --metadata-from-file=startup-script="$HERE/startup.sh" \
         --labels=workload=adrenal-multiorgan 2>&1); then
-        echo "Created $NAME in $ZONE. It sets itself up and starts training; the first start takes about 30 minutes."
+        echo "Created $NAME in $ZONE. It sets itself up and starts training; the first start prepares the data, which takes a few hours."
         echo "Progress: bash $HERE/progress.sh"
         exit 0
     fi

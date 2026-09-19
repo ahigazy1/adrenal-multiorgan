@@ -3,7 +3,7 @@
 # The lines come from the machine's serial console, so no login to the machine is needed, and they are
 # still available from Cloud Logging after the machine has switched itself off.
 NAME=adrenal-train
-WANTED='Epoch [0-9]|Pseudo dice|Uploaded|WARNING|ERROR|Error|Traceback|=== '
+WANTED='cases done|cases written|Preprocessing|Epoch [0-9]|Pseudo dice|Uploaded|WARNING|ERROR|Error|Traceback|=== '
 ZONE=$(gcloud compute instances list --filter="name=$NAME" --format="value(zone.basename())")
 [ -n "$ZONE" ] || { echo "There is no machine called $NAME in this project."; exit 1; }
 STATUS=$(gcloud compute instances describe "$NAME" --zone="$ZONE" --format="value(status)")

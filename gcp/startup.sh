@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs on the training machine at every start (create_vm.sh installs it as the machine's startup script).
-# First start: install the pinned environment and download the cache. Every start: train or continue, and when
-# training has finished, segment the held-out test scans. Then the machine switches itself off, so it never
+# First start: install the pinned environment, then download, clean and preprocess the data (prepare.sh, a few
+# hours). Every start: train or continue, and when training has finished, segment the held-out test scans. Then the machine switches itself off, so it never
 # sits idle on the bill. Whatever goes wrong, it also switches off; nothing restarts it automatically.
 #
 # Everything printed goes to /var/log/adrenal.log and to the machine's serial console, which Google keeps in
@@ -35,11 +35,11 @@ HF_TOKEN=$(curl -sf -H "Authorization: Bearer $ACCESS" \
 [ -n "$HF_TOKEN" ] || { echo "ERROR: could not read the Hugging Face token from Secret Manager"; exit 1; }
 export HF_TOKEN
 
-if [ ! -f data/.cache-complete ]; then   # a download that was interrupted continues where it stopped
-    pixi run hf download ahigazy1/adrenal-multiorgan-cache --repo-type dataset --local-dir data --exclude "sources/*"
-    touch data/.cache-complete
-fi
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+if [ ! -f data/.prepared ]; then   # after an interruption: downloads continue, the later steps start again
+    pixi run bash prepare.sh data
+    touch data/.prepared
+fi
 pixi run python train.py
 pixi run python predict.py
 echo "=== all done $(date -u)"

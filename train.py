@@ -66,14 +66,6 @@ def fetch_model_from_hugging_face():
                       allow_patterns=[f'{MODEL_FOLDER.name}/*'])
 
 
-def build_sampling_index():
-    """nnU-Net's index of where each organ is, used to pick training patches. It needs the label files of the whole
-    cache, so it is made here, after the download, by nnU-Net's own function. overwrite=False skips a finished index
-    and rebuilds one that an interruption left half-written."""
-    from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_dataset
-    extract_sampling_locations_dataset(DATASET, PLANS, configurations=(CONFIGURATION,), overwrite=False)
-
-
 def run_record():
     """Fingerprint of everything that must stay the same for a resumed run to be the same experiment."""
     preprocessed = DATA / 'nnUNet_preprocessed' / DATASET
@@ -99,7 +91,6 @@ def main():
     if (FOLD_FOLDER / 'checkpoint_final.pth').exists() and (FOLD_FOLDER / 'validation/summary.json').exists():
         log.info('Training and the final validation have already finished; nothing to do.')
         return
-    build_sampling_index()
 
     record_path = FOLD_FOLDER / 'run.json'
     if has_checkpoint():

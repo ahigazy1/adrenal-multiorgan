@@ -1,10 +1,10 @@
 # Specification
 
-Last updated September 19, 2026. Status: all five steps and the Google Cloud scripts are written; steps 1-3 and the trainer are checked locally on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
+Last updated September 19, 2026. Status: all five steps and the Google Cloud scripts are written; steps 1-3 and the trainer are checked locally on CPU; nothing has been run on Google Cloud or a GPU yet. Results used for publication come only from the logged run on the training machine. Local runs are for testing code.
 
 ## Setup
 
-Data preparation (download, cleaning, preprocessing, publishing the cache to Hugging Face) runs on a Google Colab runtime. Training runs on one cloud VM with an NVIDIA RTX PRO 6000 (96 GB) and 48 vCPUs. Training is a single command that starts or continues by itself, because the VM may be interrupted at any time.
+Everything runs on one Google Cloud Spot VM with an NVIDIA RTX PRO 6000 (96 GB) and 48 vCPUs: download, label cleaning, split, nnU-Net preprocessing, training and prediction on the held-out scans. It is started with one command and may be interrupted at any time, so every stage either continues or starts again by itself when the machine is started again. The tables of the cleaning and the split, the logs, the checkpoints and the predictions' scores are uploaded to Hugging Face. (An earlier plan prepared the data on Colab and published a 200 GB preprocessed cache; preparing on the training machine costs a few GPU-idle hours and removes that transfer.)
 
 ## Decided
 
@@ -25,7 +25,7 @@ Data preparation (download, cleaning, preprocessing, publishing the cache to Hug
 | CT intensity normalization | AtlasNet's, unchanged: clip to [-1000, 629] HU, subtract -182.95, divide by 406.48 (the values stored in `atlasnet_plans.json`). They are not recomputed from our data, because the transferred weights expect inputs on this scale |
 | Image reader | nnU-Net's `NibabelIOWithReorient`, as in AtlasNet's plans |
 | Test, validation, training | 20% / 16% / 64% of the kept scans of every source, stratified by slice thickness and adrenal volume (see below); validation is used for monitoring and for choosing the best checkpoint |
-| Cache | private Hugging Face dataset `ahigazy1/adrenal-multiorgan-cache` |
+| Hugging Face | private model repository `ahigazy1/adrenal-multiorgan-model`: tables, logs, checkpoints. The private dataset `ahigazy1/adrenal-multiorgan-cache` only holds a copy of the TotalSegmentator zip, because Zenodo is slow |
 | Checkpoints | every 100 epochs, plus the best (by nnU-Net's validation Dice moving average); uploaded to Hugging Face every 100 epochs |
 
 ### Adrenal label cleaning rule
@@ -92,7 +92,6 @@ Decided: keep AtlasNet's [-1000, 629] HU. The window is wide because AtlasNet's 
 
 ## Work items
 
-1. Run `colab_prepare.sh` on Colab: final inclusion table, the cleaned dataset and the split.
-2. Run `preprocess.py` on Colab. Written as: transfer AtlasNet's plans with nnU-Net's `move_plans_between_datasets`, set the SimpleITK resamplers, copy `dataset.json` beside the plans, run nnU-Net's preprocessing on Colab, publish the cache to Hugging Face. (Tried locally on 5 scans: works; the transfer changes only the dataset name, plans name and data identifier; adrenal volumes in the 1 mm cache are within 1.5% of the originals.)
-3. On Google Cloud (`gcp/create_vm.sh`): a short timing test first, then the full run; `predict.py` follows automatically. The Google Cloud scripts and the pinned environment have not been run yet.
-4. Add surface Dice and signed/absolute volume error to the evaluation (`predict.py` currently reports nnU-Net's Dice and voxel counts).
+1. First run on Google Cloud (`gcp/create_vm.sh`). Nothing in `gcp/`, `prepare.sh` or the pinned environment has been run yet; expect small fixes. Check the uploaded tables (exclusions per rule and source, balance of the split) while preprocessing runs.
+2. Look at the first epochs (time per epoch, GPU memory) before leaving the 2000-epoch run alone.
+3. Add surface Dice and signed/absolute volume error to the evaluation (`predict.py` currently reports nnU-Net's Dice and voxel counts, from which volumes follow).

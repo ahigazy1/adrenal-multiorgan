@@ -1,17 +1,17 @@
-"""Step 3: preprocess the dataset for AtlasNet and publish the training cache on Hugging Face.
+"""Step 3: preprocess the dataset for AtlasNet with nnU-Net's own preprocessing.
 
-    python preprocess.py --data /content/data
+    python preprocess.py --data data
 
-1. Plans: AtlasNet's plans are transferred with nnU-Net's own move_plans_between_datasets (architecture, 1 mm
+1. nnU-Net's dataset integrity check (every image/label pair: same shape, spacing, orientation; known labels only).
+2. Plans: AtlasNet's plans are transferred with nnU-Net's own move_plans_between_datasets (architecture, 1 mm
    spacing and CT normalization stay AtlasNet's), then the three resampling functions are set to SimpleITK.
-2. Preprocessing: nnU-Net's own per-case function, 100 scans at a time. Each group is uploaded and then deleted
-   from this disk, because the whole cache (about 200 GB) does not fit on a Colab runtime.
-3. Also uploaded: the plans, dataset.json, the split, the labels nnU-Net validates against, step 1 and 2's tables,
-   the held-out test scans, and the AtlasNet checkpoint, so that the training machine needs this one repository only.
-   (nnU-Net's foreground-sampling index needs all scans at once; train.py builds it on the training machine.)
+3. nnU-Net's preprocessor on every training scan, its patch-sampling index, and the copy of the labels it validates
+   against. These are the three things nnU-Net's preprocess_dataset() does; they are called one by one because that
+   function still imports distutils, which Python 3.12 no longer has.
+4. The AtlasNet checkpoint is downloaded and its checksum verified.
 
-Scans that are already in the repository are skipped, so after an interruption just run it again.
-Needs `pip install -e vendor/nnUNet` and a Hugging Face login with write access (`hf auth login`).
+An interrupted run starts again from the beginning of step 3 (nnU-Net's preprocessor clears its output folder).
+Needs `pip install -e vendor/nnUNet` (or the pixi environment).
 """
 import argparse
 import json
@@ -19,15 +19,12 @@ import logging
 import os
 import shutil
 import zipfile
-from multiprocessing import get_context
 from pathlib import Path
 
 from cohort_scan import sha256
 
-REPOSITORY = 'ahigazy1/adrenal-multiorgan-cache'
 DATASET = 'Dataset902_AdrenalMultiorgan'
 PLANS = 'AtlasNetPlans'
-GROUP_SIZE = 100
 ATLASNET = {'repo': 'AbdomenAtlas/AtlasNet', 'revision': 'fd03b410350096da9bc743cd77f937aaffc11fcf',
             'archive': 'AbdomenAtlasNetOrgans.zip', 'source_dataset': 'Dataset224_AbdomenAtlas1.1',
             'source_plans': 'nnUNetPlannerResEncL_torchres_isotropic',
@@ -46,7 +43,7 @@ log = logging.getLogger('preprocess')
 
 
 def write_plans(root, preprocessed):
-    """AtlasNet's plans under our dataset's name, with SimpleITK resampling. Returns the plans as a dict."""
+    """AtlasNet's plans under our dataset's name, with SimpleITK resampling."""
     from nnunetv2.experiment_planning.plans_for_pretraining.move_plans_between_datasets import move_plans_between_datasets
     source = preprocessed.parent / ATLASNET['source_dataset']  # move_plans reads the source plans from a dataset folder
     source.mkdir(parents=True, exist_ok=True)
@@ -57,7 +54,6 @@ def write_plans(root, preprocessed):
     plans = json.loads(path.read_text())
     plans['configurations']['3d_fullres'] |= RESAMPLING
     path.write_text(json.dumps(plans, indent=2))
-    return plans
 
 
 def fetch_atlasnet_checkpoint(data):
@@ -72,14 +68,12 @@ def fetch_atlasnet_checkpoint(data):
                 shutil.copyfileobj(source, out)
     if sha256(target) != ATLASNET['checkpoint_sha256']:
         raise SystemExit(f'{target} is not the expected AtlasNet checkpoint')
-    return target
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--data', required=True, type=Path, help="the folder build_dataset.py wrote into")
-    parser.add_argument('--workers', type=int, default=min(24, os.cpu_count()), help='each worker needs about 4 GB of RAM')
-    parser.add_argument('--no-upload', action='store_true', help='keep everything on this disk (for a local test)')
+    parser.add_argument('--data', required=True, type=Path, help='the folder build_dataset.py wrote into')
+    parser.add_argument('--workers', type=int, default=min(32, os.cpu_count()), help='each worker needs about 4 GB of RAM')
     args = parser.parse_args()
     data = args.data.resolve()
     raw, preprocessed = data / 'nnUNet_raw' / DATASET, data / 'nnUNet_preprocessed' / DATASET
@@ -89,59 +83,22 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(preprocessed / 'preprocess.log', 'a')])
 
-    from huggingface_hub import HfApi
     from nnunetv2.experiment_planning.verify_dataset_integrity import verify_dataset_integrity
     from nnunetv2.preprocessing.preprocessors.default_preprocessor import DefaultPreprocessor
-    from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
-    from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets
-    api = HfApi()
+    from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_dataset
 
-    def upload(folder, path_in_repo, message, **patterns):
-        if not args.no_upload:
-            api.upload_folder(repo_id=REPOSITORY, repo_type='dataset', folder_path=folder, path_in_repo=path_in_repo,
-                              commit_message=message, **patterns)
-
-    # nnU-Net's own check of every image/label pair (same shape, spacing, orientation; only known label values).
-    # The plan transfer below skips the nnU-Net command that would normally run it.
+    log.info('Checking the dataset with nnU-Net')
     verify_dataset_integrity(str(raw), args.workers)
-    plans = write_plans(Path(__file__).resolve().parent, preprocessed)
-    # Two things nnU-Net's own preprocessing command does around the per-case work:
+    write_plans(Path(__file__).resolve().parent, preprocessed)
     shutil.copy(raw / 'dataset.json', preprocessed / 'dataset.json')
-    shutil.copytree(raw / 'labelsTr', preprocessed / 'gt_segmentations', dirs_exist_ok=True)  # used by the final validation
-    dataset_json = json.loads((raw / 'dataset.json').read_text())
-    plans_manager = PlansManager(plans)
-    configuration = plans_manager.get_configuration('3d_fullres')
-    output = preprocessed / configuration.data_identifier
-    output.mkdir(exist_ok=True)
 
-    in_repository = set() if args.no_upload else set(api.list_repo_files(REPOSITORY, repo_type='dataset'))
-    prefix = f'nnUNet_preprocessed/{DATASET}/{configuration.data_identifier}'
-    cases = get_filenames_of_train_images_and_targets(str(raw), dataset_json)
-    todo = sorted(c for c in cases if f'{prefix}/{c}.pkl' not in in_repository and not (output / f'{c}.pkl').exists())
-    log.info('%d training scans, %d still to preprocess, %d workers', len(cases), len(todo), args.workers)
+    log.info('Preprocessing with %d workers', args.workers)
+    DefaultPreprocessor(verbose=False).run(DATASET, '3d_fullres', PLANS, num_processes=args.workers)
+    extract_sampling_locations_dataset(DATASET, PLANS, configurations=('3d_fullres',))
+    shutil.copytree(raw / 'labelsTr', preprocessed / 'gt_segmentations', dirs_exist_ok=True)
 
-    preprocessor = DefaultPreprocessor(verbose=False)
-    for start in range(0, len(todo), GROUP_SIZE):
-        group = todo[start:start + GROUP_SIZE]
-        jobs = [(str(output / c), cases[c]['images'], cases[c]['label'], plans_manager, configuration, dataset_json)
-                for c in group]
-        with get_context('spawn').Pool(args.workers) as pool:  # 'spawn', as nnU-Net does
-            pool.starmap(preprocessor.run_case_save, jobs)
-        upload(output, prefix, f'Preprocessed scans {start + 1}-{start + len(group)} of {len(todo)}')
-        log.info('%d of %d scans done', start + len(group), len(todo))
-        if not args.no_upload:
-            shutil.rmtree(output)  # uploaded; free the disk for the next group
-            output.mkdir()
-
-    if args.no_upload:
-        return
     fetch_atlasnet_checkpoint(data)
-    upload(data / 'atlas', 'atlas', 'AtlasNet checkpoint used for initialization')
-    upload(preprocessed, f'nnUNet_preprocessed/{DATASET}', 'Plans, dataset.json, split, validation labels and log',
-           allow_patterns=['*.json', '*.log', 'gt_segmentations/*'])
-    upload(raw, f'nnUNet_raw/{DATASET}', 'Held-out test scans and the dataset tables',
-           allow_patterns=['imagesTs/*', 'labelsTs/*', '*.json', '*.csv', '*.log'])
-    log.info('Finished. Cache: https://huggingface.co/datasets/%s', REPOSITORY)
+    log.info('Finished: %s', preprocessed)
 
 
 if __name__ == '__main__':
