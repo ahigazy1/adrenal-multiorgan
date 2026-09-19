@@ -13,10 +13,12 @@ df -h /content | tail -1
 
 pip install --quiet -r requirements.txt
 
-# TotalSegmentator v2.0.1, CC BY 4.0, https://zenodo.org/records/10047292
-TS="$DATA/Totalsegmentator_dataset_v201.zip"
+# TotalSegmentator v2.0.1, CC BY 4.0, https://zenodo.org/records/10047292. Zenodo is slow, so a copy of the same
+# file in our Hugging Face repository is tried first; either way the checksum Zenodo publishes must match.
+TS="$DATA/sources/Totalsegmentator_dataset_v201.zip"
 if ! echo "fe250e5718e0a3b5df4c4ea9d58a62fe  $TS" | md5sum --check --status 2>/dev/null; then
-    wget --continue --no-verbose -O "$TS" "https://zenodo.org/records/10047292/files/Totalsegmentator_dataset_v201.zip?download=1"
+    hf download ahigazy1/adrenal-multiorgan-cache sources/Totalsegmentator_dataset_v201.zip --repo-type dataset --local-dir "$DATA" \
+        || { mkdir -p "$DATA/sources"; wget --continue --no-verbose -O "$TS" "https://zenodo.org/records/10047292/files/Totalsegmentator_dataset_v201.zip?download=1"; }
     echo "fe250e5718e0a3b5df4c4ea9d58a62fe  $TS" | md5sum --check
 fi
 

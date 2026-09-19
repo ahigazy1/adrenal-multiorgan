@@ -65,6 +65,21 @@ def fetch_model_from_hugging_face():
         log.info('Nothing downloaded: %r', error)
 
 
+def build_sampling_index():
+    """nnU-Net's index of where each organ is, used to pick training patches. It is built from the label files of the
+    whole cache, so it is made here, after the download, by nnU-Net's own function."""
+    from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_for_folder
+    from nnunetv2.training.dataloading.foreground_locations import FG_SAMPLING_DIRNAME
+    from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
+    preprocessed = DATA / 'nnUNet_preprocessed' / DATASET
+    plans = PlansManager(str(preprocessed / f'{PLANS}.json'))
+    cache = preprocessed / plans.get_configuration(CONFIGURATION).data_identifier
+    if not (cache / FG_SAMPLING_DIRNAME).exists():
+        log.info('Building the patch-sampling index (once, a few minutes)')
+        labels = plans.get_label_manager(json.loads((preprocessed / 'dataset.json').read_text()))
+        extract_sampling_locations_for_folder(str(cache), labels.classes_or_regions_for_sampling)
+
+
 def run_record():
     """Fingerprint of everything that must stay the same for a resumed run to be the same experiment."""
     preprocessed = DATA / 'nnUNet_preprocessed' / DATASET
@@ -87,6 +102,10 @@ def main():
 
     if not has_checkpoint():
         fetch_model_from_hugging_face()
+    if (FOLD_FOLDER / 'checkpoint_final.pth').exists() and (FOLD_FOLDER / 'validation/summary.json').exists():
+        log.info('Training and the final validation have already finished; nothing to do.')
+        return
+    build_sampling_index()
 
     record_path = FOLD_FOLDER / 'run.json'
     if has_checkpoint():

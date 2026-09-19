@@ -1,0 +1,38 @@
+# The pinned environment of the training machine: `pixi install --locked`, then `pixi run python train.py`.
+[workspace]
+name = "adrenal-multiorgan"
+version = "0.1.0"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.12.*"
+
+[activation.env]
+PYTHONNOUSERSITE = "1"
+HF_XET_HIGH_PERFORMANCE = "1"
+
+[pypi-dependencies]
+nnunetv2 = { path = "vendor/nnUNet", editable = true }
+huggingface-hub = ">=1,<2"
+polars = "*"
+surface-distance = "==0.1"
+
+[feature.cpu.pypi-dependencies]
+torch = { version = "==2.10.0", index = "https://download.pytorch.org/whl/cpu" }
+torchvision = { version = "==0.25.0", index = "https://download.pytorch.org/whl/cpu" }
+
+[feature.gpu.system-requirements]
+cuda = "12.8"
+
+[feature.gpu.dependencies]
+ninja = "*"
+cxx-compiler = "*"
+
+[feature.gpu.pypi-dependencies]
+torch = { version = "==2.10.0", index = "https://download.pytorch.org/whl/cu128" }
+torchvision = { version = "==0.25.0", index = "https://download.pytorch.org/whl/cu128" }
+
+[environments]
+default = { features = ["gpu"] }
+prep = { features = ["cpu"] }

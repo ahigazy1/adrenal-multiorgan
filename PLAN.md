@@ -1,6 +1,6 @@
 # Specification
 
-Last updated September 19, 2026. Status: steps 1, 2, 4 and 5 are written and checked on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
+Last updated September 19, 2026. Status: all five steps and the Google Cloud scripts are written; steps 1-3 and the trainer are checked locally on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
 
 ## Setup
 
@@ -91,6 +91,6 @@ Decided: keep AtlasNet's [-1000, 629] HU. The window is wide because AtlasNet's 
 ## Work items
 
 1. Run `colab_prepare.sh` on Colab: final inclusion table, the cleaned dataset and the split.
-2. Step 3 script: transfer AtlasNet's plans with nnU-Net's `move_plans_between_datasets`, set the SimpleITK resamplers, copy `dataset.json` beside the plans, run nnU-Net's preprocessing on Colab, publish the cache to Hugging Face. (Tried locally on 5 scans: works; the transfer changes only the dataset name, plans name and data identifier; adrenal volumes in the 1 mm cache are within 1.5% of the originals.)
-3. Five-epoch timing test of `train.py` on the GPU VM, then the full run, then `predict.py`.
+2. Run `preprocess.py` on Colab. Written as: transfer AtlasNet's plans with nnU-Net's `move_plans_between_datasets`, set the SimpleITK resamplers, copy `dataset.json` beside the plans, run nnU-Net's preprocessing on Colab, publish the cache to Hugging Face. (Tried locally on 5 scans: works; the transfer changes only the dataset name, plans name and data identifier; adrenal volumes in the 1 mm cache are within 1.5% of the originals.)
+3. On Google Cloud (`gcp/create_vm.sh`): a short timing test first, then the full run; `predict.py` follows automatically. The Google Cloud scripts and the pinned environment have not been run yet.
 4. Add surface Dice and signed/absolute volume error to the evaluation (`predict.py` currently reports nnU-Net's Dice and voxel counts).
