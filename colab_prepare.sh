@@ -1,5 +1,5 @@
 #!/bin/bash
-# Steps 1 and 2 on a Colab runtime: download the three public datasets, verify them, scan, build the dataset.
+# Steps 1 and 2 on a Colab runtime: download the four public datasets, verify them, scan, build the dataset.
 # Run from the repository folder:  bash colab_prepare.sh
 # Inputs land in /content/data, logs and tables in ./results. Needs about 80 GB of free disk.
 # Safe to rerun: finished downloads are skipped.
@@ -20,13 +20,14 @@ if ! echo "fe250e5718e0a3b5df4c4ea9d58a62fe  $TS" | md5sum --check --status 2>/d
     echo "fe250e5718e0a3b5df4c4ea9d58a62fe  $TS" | md5sum --check
 fi
 
-# AMOS22 CT and BTCV from Hugging Face, at pinned revisions
+# AMOS22 CT, BTCV and FLARE22 from Hugging Face, at pinned revisions
 hf download MedOtter/amos22-ct-dataset --repo-type dataset --revision c67f7c01e66277038d87975b03b73ece489a3035 \
     --include "train/*" --include "valid/*" --local-dir "$DATA/amos"
 hf download lingheng123/btcv --repo-type dataset --revision c1728b451a00c054875a0a97d7658d1eaf8362b5 \
     --include "RawData/Training/*" --local-dir "$DATA/btcv"
+hf download MedOtter/FLARE22 --repo-type dataset --revision ab0b99b53e2183fe59321b5888867c6c7cb0792a \n    --include "images/*" --include "labels/*" --local-dir "$DATA/flare"
 
-python cohort_scan.py --out results --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --workers "$(nproc)"
-python build_dataset.py --scan results/cohort_scan.csv --out "$DATA" --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --workers "$(nproc)"
+python cohort_scan.py --out results --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --flare "$DATA/flare" --workers "$(nproc)"
+python build_dataset.py --scan results/cohort_scan.csv --out "$DATA" --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --flare "$DATA/flare" --workers "$(nproc)"
 cp "$DATA"/nnUNet_raw/Dataset902_AdrenalMultiorgan/build_dataset.{csv,json,log} results/
 echo "=== colab_prepare.sh done $(date -u)"

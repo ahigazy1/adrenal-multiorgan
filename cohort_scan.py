@@ -1,6 +1,6 @@
 """Step 1: measure every scan and apply the adrenal cleaning rule. Changes no data.
 
-For each case in TotalSegmentator v2, AMOS22 CT and BTCV this writes one CSV row with the
+For each case in TotalSegmentator v2, AMOS22 CT, BTCV and FLARE22 this writes one CSV row with the
 volume (mL) of each target organ and, per adrenal gland, the connected-component analysis
 and the resulting decision. The rule (see PLAN.md):
 
@@ -11,7 +11,7 @@ and the resulting decision. The rule (see PLAN.md):
     exactly one component > 1 mL            -> keep
 
 Usage (each source is optional):
-    python cohort_scan.py --out results --ts Totalsegmentator_dataset_v201.zip --amos amos/ --btcv btcv/
+    python cohort_scan.py --out results --ts Totalsegmentator_dataset_v201.zip --amos amos/ --btcv btcv/ --flare flare/
 """
 import argparse
 import csv
@@ -40,11 +40,17 @@ TS_FILES = {'adrenal_left': ['adrenal_gland_left'], 'adrenal_right': ['adrenal_g
             'kidney_left': ['kidney_left', 'kidney_cyst_left'], 'kidney_right': ['kidney_right', 'kidney_cyst_right'],
             'liver': ['liver'], 'spleen': ['spleen'], 'aorta': ['aorta'],
             'inferior_vena_cava': ['inferior_vena_cava'], 'pancreas': ['pancreas']}
-# AMOS and BTCV: one label file per case; these are the integer ids inside it.
-AMOS_IDS = {'spleen': 1, 'kidney_right': 2, 'kidney_left': 3, 'liver': 6, 'aorta': 8,
-            'inferior_vena_cava': 9, 'pancreas': 10, 'adrenal_right': 11, 'adrenal_left': 12}
-BTCV_IDS = {'spleen': 1, 'kidney_right': 2, 'kidney_left': 3, 'liver': 6, 'aorta': 8,
-            'inferior_vena_cava': 9, 'pancreas': 11, 'adrenal_right': 12, 'adrenal_left': 13}
+# AMOS, BTCV and FLARE22: one label file per case; these are the integer ids inside it.
+LABEL_IDS = {
+    'amos': {'spleen': 1, 'kidney_right': 2, 'kidney_left': 3, 'liver': 6, 'aorta': 8,
+             'inferior_vena_cava': 9, 'pancreas': 10, 'adrenal_right': 11, 'adrenal_left': 12},
+    'btcv': {'spleen': 1, 'kidney_right': 2, 'kidney_left': 3, 'liver': 6, 'aorta': 8,
+             'inferior_vena_cava': 9, 'pancreas': 11, 'adrenal_right': 12, 'adrenal_left': 13},
+    'flare': {'liver': 1, 'kidney_right': 2, 'spleen': 3, 'pancreas': 4, 'aorta': 5, 'inferior_vena_cava': 6,
+              'adrenal_right': 7, 'adrenal_left': 8, 'kidney_left': 13}}
+# Where each of those sources keeps its label files, and the split its own authors gave them.
+LABEL_FOLDERS = (('amos', 'train/labelsTr', 'train'), ('amos', 'valid/labelsVa', 'val'),
+                 ('btcv', 'RawData/Training/label', 'train'), ('flare', 'labels', 'train'))
 
 log = logging.getLogger('cohort_scan')
 
@@ -63,7 +69,7 @@ def judge_gland(mask, voxel_ml):
 
 
 def load_masks(source, case, official_split, folders):
-    """Read one case's labels. Returns (label image, {organ: boolean mask}); folders = {'ts': zip, 'amos': dir, 'btcv': dir}."""
+    """Read one case's labels. Returns (label image, {organ: boolean mask}); folders = {'ts': zip, 'amos': dir, ...}."""
     if source == 'ts':
         with zipfile.ZipFile(folders['ts']) as archive:
             def read(structure):
@@ -73,13 +79,12 @@ def load_masks(source, case, official_split, folders):
             return read('liver'), masks
     image = nib.load(label_path(source, case, official_split, folders))
     labels = np.asanyarray(image.dataobj)
-    return image, {organ: labels == value for organ, value in (AMOS_IDS if source == 'amos' else BTCV_IDS).items()}
+    return image, {organ: labels == value for organ, value in LABEL_IDS[source].items()}
 
 
 def label_path(source, case, official_split, folders):
-    if source == 'amos':
-        return folders['amos'] / ('train/labelsTr' if official_split == 'train' else 'valid/labelsVa') / f'{case}.nii.gz'
-    return folders['btcv'] / 'RawData/Training/label' / f'{case}.nii.gz'
+    folder = next(f for s, f, split in LABEL_FOLDERS if (s, split) == (source, official_split))
+    return folders[source] / folder / f'{case}.nii.gz'
 
 
 def voxel_volume_ml(image):
@@ -133,6 +138,7 @@ def main():
     parser.add_argument('--ts', type=Path, help='Totalsegmentator_dataset_v201.zip')
     parser.add_argument('--amos', type=Path, help='folder holding train/labelsTr and valid/labelsVa')
     parser.add_argument('--btcv', type=Path, help='folder holding RawData/Training/label')
+    parser.add_argument('--flare', type=Path, help='folder holding labels/')
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--limit', type=int, help='only the first N cases per source (for a quick test)')
     args = parser.parse_args()
@@ -144,7 +150,7 @@ def main():
               'minimum_ml': MINIMUM_ML, 'python': sys.version, 'numpy': np.__version__,
               'scipy': scipy.__version__, 'nibabel': nib.__version__, 'inputs': {}}
 
-    folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv}
+    folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv, 'flare': args.flare}
     jobs = []
     if args.ts:
         log.info('Hashing %s', args.ts)
@@ -152,8 +158,7 @@ def main():
         with zipfile.ZipFile(args.ts) as archive:
             lines = archive.read('meta.csv').decode('utf-8-sig').splitlines()
         jobs += [('ts', m['image_id'], m['split'], folders) for m in csv.DictReader(lines, delimiter=';')][:args.limit]
-    for source, folder, split in (('amos', 'train/labelsTr', 'train'), ('amos', 'valid/labelsVa', 'val'),
-                                  ('btcv', 'RawData/Training/label', 'train')):
+    for source, folder, split in LABEL_FOLDERS:
         if folders[source]:
             files = sorted((folders[source] / folder).glob('*.nii.gz'))[:args.limit]
             jobs += [(source, f.name.removesuffix('.nii.gz'), split, folders) for f in files]
@@ -200,9 +205,10 @@ def self_check():
     gland[20:27, 20:27, 20:27] = True  # 0.343 mL second component
     assert judge_gland(gland, 0.001)[0] == 'exclude_fragmented'
     labels = np.zeros((30, 30, 30), np.uint8)  # multi-label file, as in AMOS
-    labels[:11, :10, :10] = AMOS_IDS['adrenal_left']
-    assert judge_gland(labels == AMOS_IDS['adrenal_left'], 0.001)[0] == 'keep'
-    assert judge_gland(labels == AMOS_IDS['adrenal_right'], 0.001)[0] == 'absent'
+    labels[:11, :10, :10] = LABEL_IDS['amos']['adrenal_left']
+    assert judge_gland(labels == LABEL_IDS['amos']['adrenal_left'], 0.001)[0] == 'keep'
+    assert judge_gland(labels == LABEL_IDS['amos']['adrenal_right'], 0.001)[0] == 'absent'
+    assert all(set(ids) == set(GLANDS + OTHER_ORGANS) for ids in LABEL_IDS.values())  # every source maps all 9
 
 if __name__ == '__main__':
     self_check()

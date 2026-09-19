@@ -7,19 +7,21 @@ into nnUNet_raw/Dataset902_AdrenalMultiorgan, as imagesTr/labelsTr (training) or
 (held-out test), plus dataset.json, splits_final.json (fold 0) and build_dataset.csv (one row per case).
 
 Who goes where:
-  test             TotalSegmentator's official test split, AMOS's official validation set, 6 fixed BTCV scans
+  test             TotalSegmentator's official test split and AMOS's official validation set; BTCV and FLARE22
+                   publish no labelled test set, so a seeded random 20% of each is held out instead
   train/validation everything else, divided by nnU-Net's own default split (5 folds, seed 12345); fold 0 is used
 
 Each case is re-judged with step 1's rule and must get step 1's decision, so the two steps cannot drift apart.
 
 Usage:
-    python build_dataset.py --scan results/cohort_scan.csv --out data --ts TS.zip --amos amos/ --btcv btcv/
+    python build_dataset.py --scan results/cohort_scan.csv --out data --ts TS.zip --amos amos/ --btcv btcv/ --flare flare/
 """
 import argparse
 import csv
 import gzip
 import json
 import logging
+import random
 import sys
 import zipfile
 from multiprocessing import Pool
@@ -40,7 +42,8 @@ LABELS = {'background': 0, 'adrenal_left': 1, 'adrenal_right': 2, 'kidney_left':
           'liver': 5, 'spleen': 6, 'aorta': 7, 'inferior_vena_cava': 8, 'pancreas': 9}
 WRITE_ORDER = ['liver', 'spleen', 'kidney_left', 'kidney_right', 'aorta', 'inferior_vena_cava', 'pancreas',
                'adrenal_left', 'adrenal_right']
-BTCV_TEST = {'label0001', 'label0004', 'label0008', 'label0009', 'label0031', 'label0034'}  # fixed list
+HELD_OUT_FRACTION = 0.2  # of BTCV and of FLARE22
+SEED = 12345  # the seed nnU-Net uses for its split
 
 log = logging.getLogger('build_dataset')
 
@@ -55,13 +58,15 @@ def largest_component(mask):
 def image_path(source, case, official_split, folders):
     if source == 'amos':
         return folders['amos'] / ('train/imagesTr' if official_split == 'train' else 'valid/imagesVa') / f'{case}.nii.gz'
+    if source == 'flare':
+        return folders['flare'] / 'images' / f'{case}_0000.nii.gz'
     return folders['btcv'] / 'RawData/Training/img' / f"{case.replace('label', 'img')}.nii.gz"
 
 
 def build_case(job):
     row, role, folders, out = job
     source, case = row['source'], row['case']
-    name = case if case.startswith(source) else f'{source}_{case}'  # ts_s0001, amos_0001, btcv_label0001
+    name = case if case.lower().startswith(source) else f'{source}_{case}'  # ts_s0001, amos_0001, FLARE22_Tr_0001
     suffix = 'Ts' if role == 'test' else 'Tr'
     image_out = out / f'images{suffix}' / f'{name}_0000.nii.gz'
     label_out = out / f'labels{suffix}' / f'{name}.nii.gz'
@@ -108,12 +113,14 @@ def build_case(job):
         return {'name': name, 'source': source, 'case': case, 'role': 'failed', 'error': repr(error)}
 
 
-def is_test(row):
-    if row['source'] == 'ts':
-        return row['official_split'] == 'test'
-    if row['source'] == 'amos':
-        return row['official_split'] == 'val'
-    return row['case'] in BTCV_TEST
+def test_cases(rows):
+    """(source, case) of every held-out scan among the kept rows."""
+    held_out = {(r['source'], r['case']) for r in rows
+                if (r['source'], r['official_split']) in (('ts', 'test'), ('amos', 'val'))}
+    for source in ('btcv', 'flare'):
+        cases = sorted(r['case'] for r in rows if r['source'] == source)  # sorted: the draw ignores input order
+        held_out |= {(source, c) for c in random.Random(SEED).sample(cases, round(len(cases) * HELD_OUT_FRACTION))}
+    return held_out
 
 
 def main():
@@ -123,6 +130,7 @@ def main():
     parser.add_argument('--ts', type=Path)
     parser.add_argument('--amos', type=Path)
     parser.add_argument('--btcv', type=Path)
+    parser.add_argument('--flare', type=Path)
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--limit', type=int, help='only the first N kept cases per source (for a quick test)')
     args = parser.parse_args()
@@ -133,17 +141,18 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(raw / 'build_dataset.log', 'w')])
 
-    folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv}
+    folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv, 'flare': args.flare}
     scanned = list(csv.DictReader(open(args.scan)))
     kept = [r for r in scanned if r['scan'].startswith('kept') and folders[r['source']]]
     log.info('%d scanned, %d kept by step 1 from the sources given, %d excluded or failed there',
              len(scanned), len(kept), len(scanned) - len(kept))
+    held_out = test_cases(kept)  # before --limit, so a quick test gives each case the role it has in the full run
     if args.limit:
         kept = [r for s in folders for r in [k for k in kept if k['source'] == s][:args.limit]]
 
     rows = []
     with Pool(args.workers) as pool:
-        jobs = [(r, 'test' if is_test(r) else 'train', folders, raw) for r in kept]
+        jobs = [(r, 'test' if (r['source'], r['case']) in held_out else 'train', folders, raw) for r in kept]
         for row in pool.imap_unordered(build_case, jobs, chunksize=4):
             rows.append(row)
             if row['error']:
@@ -167,10 +176,11 @@ def main():
     (preprocessed / 'splits_final.json').write_text(json.dumps(splits, indent=2))
     log.info('Fold 0: %d training and %d validation cases', len(splits[0]['train']), len(splits[0]['val']))
 
-    for source in ('ts', 'amos', 'btcv'):
+    for source in folders:
         log.info('%-5s ' + '  '.join(f'{role} %4d' for role in names), source,
                  *[sum(r['source'] == source and r['role'] == role for r in rows) for role in names])
     record = {'scan_csv_sha256': sha256(args.scan), 'split': 'nnU-Net default: 5 folds, seed 12345',
+              'held_out_fraction_btcv_flare': HELD_OUT_FRACTION, 'held_out_seed': SEED,
               'labels': LABELS, 'counts': {role: len(n) for role, n in names.items()},
               'build_dataset_csv_sha256': sha256(raw / 'build_dataset.csv')}
     (raw / 'build_dataset.json').write_text(json.dumps(record, indent=2))
@@ -185,8 +195,12 @@ def self_check():
     gland[10, 10, 10] = True  # speckle
     cleaned = largest_component(gland)
     assert cleaned.sum() == 125 and not cleaned[10, 10, 10]
-    assert is_test({'source': 'btcv', 'case': 'label0004'}) and not is_test({'source': 'btcv', 'case': 'label0002'})
-    assert is_test({'source': 'amos', 'official_split': 'val'}) and not is_test({'source': 'ts', 'official_split': 'val'})
+    rows = [{'source': 'btcv', 'case': f'label{i:04}', 'official_split': 'train'} for i in range(30)]
+    rows += [{'source': 'ts', 'case': 's0001', 'official_split': 'val'}, {'source': 'ts', 'case': 's0002', 'official_split': 'test'},
+             {'source': 'amos', 'case': 'amos_0001', 'official_split': 'val'}]
+    held_out = test_cases(rows)
+    assert len(held_out) == 8 and {('ts', 's0002'), ('amos', 'amos_0001')} <= held_out and ('ts', 's0001') not in held_out
+    assert held_out == test_cases(rows[::-1])  # the draw does not depend on input order
 
 if __name__ == '__main__':
     self_check()

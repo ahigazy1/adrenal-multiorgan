@@ -1,6 +1,6 @@
 # adrenal-multiorgan
 
-Fine-tuning AtlasNet (nnU-Net) to segment the adrenal glands, kidneys, liver, spleen, aorta, inferior vena cava and pancreas on CT, from three public datasets: TotalSegmentator v2, AMOS22 CT and BTCV. The full specification and the reasons behind each choice are in [PLAN.md](PLAN.md).
+Fine-tuning AtlasNet (nnU-Net) to segment the adrenal glands, kidneys, liver, spleen, aorta, inferior vena cava and pancreas on CT, from four public datasets: TotalSegmentator v2, AMOS22 CT, BTCV and FLARE22. The full specification and the reasons behind each choice are in [PLAN.md](PLAN.md).
 
 The work is a short sequence of steps. Each step is one small script that logs what it did, records the exact inputs it used, and changes nothing outside its output folder. Data preparation runs on a Google Colab runtime; training runs on a single GPU VM.
 
@@ -23,7 +23,7 @@ git clone https://github.com/ahigazy1/adrenal-multiorgan && cd adrenal-multiorga
 bash colab_prepare.sh
 ```
 
-This downloads TotalSegmentator v2.0.1 from Zenodo (23.6 GB, checksum verified) and AMOS22 CT and BTCV from Hugging Face at pinned revisions (about 80 GB of disk in total), then runs the two scripts.
+This downloads TotalSegmentator v2.0.1 from Zenodo (23.6 GB, checksum verified) and AMOS22 CT, BTCV and FLARE22 from Hugging Face at pinned revisions (about 80 GB of disk in total), then runs the two scripts.
 
 `cohort_scan.py` changes no data. It writes to `results/`:
 
@@ -71,4 +71,5 @@ segments the held-out test scans with the final checkpoint (`--checkpoint best` 
 - TotalSegmentator v2.0.1: https://zenodo.org/records/10047292 (CC BY 4.0)
 - AMOS22: https://huggingface.co/datasets/MedOtter/amos22-ct-dataset (CC BY 4.0)
 - BTCV: https://huggingface.co/datasets/lingheng123/btcv (originally distributed through Synapse under its own terms)
+- FLARE22: https://huggingface.co/datasets/MedOtter/FLARE22 (images CC BY-SA 4.0, labels for research use; https://zenodo.org/records/7860267)
 - AtlasNet weights: https://huggingface.co/AbdomenAtlas/AtlasNet
