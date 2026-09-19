@@ -39,6 +39,12 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 # This validates local completion, or restores a complete compatible cache, or builds and publishes one.
 # A plain touch is not enough: .prepared is written only after successful verification and publication.
 pixi run python hf_cache.py ensure --data data
+# The upload of the prepared data (about 170 GB) is only for a future replacement machine, so it runs beside
+# training at the lowest CPU and disk priority instead of making the GPU wait. It resumes on every start.
+nice -n 19 ionice -c 3 pixi run python hf_cache.py publish --data data >>/var/log/adrenal-cache-upload.log 2>&1 &
+UPLOAD=$!
 pixi run python train.py
 pixi run python predict.py
+echo "=== waiting for the cache upload, if it is still running (see /var/log/adrenal-cache-upload.log)"
+wait "$UPLOAD" || echo "WARNING: the cache upload failed; training results are not affected"
 echo "=== all done $(date -u)"

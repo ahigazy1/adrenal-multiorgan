@@ -136,6 +136,16 @@ class CacheTests(unittest.TestCase):
         self.assertTrue((self.data / '.prepared').exists())
         self.assertTrue((self.data / '.preprocessed-local.json').exists())
 
+    def test_training_can_start_before_the_upload_and_publish_finishes_it_later(self):
+        atlas, _, _, _ = self.bundle()
+        with patch.object(cache, 'recipe_id', return_value='recipe'),                 patch.object(cache, 'ATLASNET_SHA256', cache.file_info(atlas)['sha256']),                 patch.object(cache.subprocess, 'run'):
+            cache.ensure_prepared(self.data, self.root, self.hub, publish=False)
+            self.assertTrue((self.data / '.prepared').exists())
+            self.assertNotIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
+            cache.ensure_prepared(self.data, self.root, self.hub, publish=False)  # a restart: still no upload, no rebuild
+            cache.publish_prepared(self.data, self.hub)
+        self.assertIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
+
     def test_recipe_tracks_code_but_not_logs(self):
         for name in ('cohort_scan.py', 'build_dataset.py', 'preprocess.py', 'prepare.sh',
                      'atlasnet_plans.json', 'pixi.lock', 'vendor/nnUNet/example.py'):

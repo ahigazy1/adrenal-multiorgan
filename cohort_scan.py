@@ -24,6 +24,7 @@ import logging
 import sys
 import zipfile
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -192,8 +193,7 @@ def main():
     folders = {'ts': args.ts, 'amos': args.amos, 'btcv': args.btcv, 'flare': args.flare}
     jobs = []
     if args.ts:
-        log.info('Hashing %s', args.ts)
-        record['inputs']['ts_zip_sha256'] = sha256(args.ts)
+        zip_hash = ThreadPoolExecutor(1).submit(sha256, args.ts)  # 23 GB: hashed while the scan runs, not before it
         with zipfile.ZipFile(args.ts) as archive:
             lines = archive.read('meta.csv').decode('utf-8-sig').splitlines()
         jobs += [('ts', m['image_id'], m['split'], folders) for m in csv.DictReader(lines, delimiter=';')][:args.limit]
@@ -219,6 +219,8 @@ def main():
     for key in sorted(counts):
         log.info('%-40s %d', key, counts[key])
     record['counts'] = counts
+    if args.ts:
+        record['inputs']['ts_zip_sha256'] = zip_hash.result()
     # A wrong label id would show up here at once (a 5 mL "liver"), so log typical sizes per source.
     for source in sorted({row['source'] for row in rows}):
         for organ in GLANDS + OTHER_ORGANS:

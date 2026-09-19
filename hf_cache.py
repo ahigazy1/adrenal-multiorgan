@@ -354,18 +354,21 @@ def publish_cache(hub: Hub, data: Path, value: dict) -> None:
     log.info('Published complete preprocessing cache: %s', value['content_id'])
 
 
-def ensure_prepared(data: Path, root: Path = ROOT, hub=None) -> None:
+def ensure_prepared(data: Path, root: Path = ROOT, hub=None, publish: bool = True) -> None:
+    """Make the prepared data available locally. With publish=False nothing is uploaded here: training does not
+    need the upload, so startup.sh runs `publish` in the background while the GPU trains."""
     data.mkdir(parents=True, exist_ok=True)
     recipe = recipe_id(root)
     hub = hub or Hub(os.environ.get('ADRENAL_CACHE_REPO', CACHE_REPO), 'dataset')
-    # A local complete build is recorded before upload, so an upload interruption never forces a rebuild.
     for marker in (data / '.prepared', data / '.preprocessed-local.json'):
         if marker.is_file() and marker.stat().st_size:
             value = check_manifest(json.loads(marker.read_text()), 'preprocessed', recipe)
-            log.info('Checking locally completed preprocessing')
-            verify_local(data, value)
-            cache_files(data)
-            publish_cache(hub, data, value)
+            if publish:
+                log.info('Checking locally completed preprocessing')
+                verify_local(data, value)
+            cache_files(data)  # every expected file is present; same disk, so no full re-hash on each start
+            if publish:
+                publish_cache(hub, data, value)
             write_json(data / '.prepared', value)
             return
     revision, entries = hub.info()
@@ -382,9 +385,16 @@ def ensure_prepared(data: Path, root: Path = ROOT, hub=None) -> None:
         subprocess.run(['bash', str(root / 'prepare.sh'), str(data)], cwd=root, check=True)
         value = build_cache_manifest(data, recipe)
         write_json(data / '.preprocessed-local.json', value)
-        publish_cache(hub, data, value)
+        if publish:
+            publish_cache(hub, data, value)
     write_json(data / '.prepared', value)
     log.info('Verified preprocessing is ready for training')
+
+
+def publish_prepared(data: Path, hub=None) -> None:
+    """Upload the prepared data if Hugging Face does not have it yet. Safe to run beside training and to repeat."""
+    value = check_manifest(json.loads((data / '.prepared').read_text()), 'preprocessed', recipe_id())
+    publish_cache(hub or Hub(os.environ.get('ADRENAL_CACHE_REPO', CACHE_REPO), 'dataset'), data, value)
 
 
 def publish_model(model_folder: Path, message: str, hub=None) -> str:
@@ -436,11 +446,14 @@ def restore_model(model_folder: Path, expected_record: dict, hub=None) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['ensure'])
+    parser.add_argument('action', choices=['ensure', 'publish'])
     parser.add_argument('--data', type=Path, required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
-    ensure_prepared(args.data.resolve())
+    if args.action == 'ensure':
+        ensure_prepared(args.data.resolve(), publish=False)
+    else:
+        publish_prepared(args.data.resolve())
 
 
 if __name__ == '__main__':
