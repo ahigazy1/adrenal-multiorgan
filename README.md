@@ -31,7 +31,7 @@ This downloads TotalSegmentator v2.0.1 from Zenodo (23.6 GB, checksum verified) 
 - `cohort_scan.json`: input checksums, package versions, rule thresholds, outcome counts, and the CSV's checksum.
 - `cohort_scan.log`: everything printed, including the median size of each organ per dataset (a wrong label id shows up there at once).
 
-`build_dataset.py` writes `nnUNet_raw/Dataset902_AdrenalMultiorgan`: every CT that the scan kept (bytes copied unchanged), one 9-class label file per CT with adrenal speckles removed, `dataset.json`, the split, and `build_dataset.csv` with one row per case (role, speckle volume removed, overlapping voxels, labels present). Each gland is judged again with the scan's rule and must get the scan's decision, otherwise the case fails loudly. The test set is each dataset's own (see PLAN.md); the remaining scans are divided by nnU-Net's default split, written with nnU-Net's own function.
+`build_dataset.py` writes `nnUNet_raw/Dataset902_AdrenalMultiorgan`: every CT that the scan kept (bytes copied unchanged), one 9-class label file per CT with adrenal speckles removed, `dataset.json`, the split, and `build_dataset.csv` with one row per case (role, speckle volume removed, overlapping voxels, labels present). Each gland is judged again with the scan's rule and must get the scan's decision, otherwise the case fails loudly. One fifth of every source is held out as the test set and the rest is divided into nnU-Net's five folds, both with scikit-learn's `StratifiedKFold` so that each part has the same mix of sources, slice thicknesses and adrenal volumes (see PLAN.md). The mix of each part is logged.
 
 To try both locally on a few cases:
 

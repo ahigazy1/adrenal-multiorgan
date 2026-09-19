@@ -99,6 +99,7 @@ def scan_case(job):
         image, masks = load_masks(*job)
         voxel_ml = voxel_volume_ml(image)
         row['voxel_ml'] = voxel_ml
+        row['slice_thickness_mm'] = round(float(max(image.header.get_zooms()[:3])), 3)  # the coarsest axis
         for gland in GLANDS:
             decision, volumes = judge_gland(masks[gland], voxel_ml)
             row[gland] = decision

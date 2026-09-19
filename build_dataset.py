@@ -6,10 +6,12 @@ For every scan that step 1 kept, this writes
 into nnUNet_raw/Dataset902_AdrenalMultiorgan, as imagesTr/labelsTr (training) or imagesTs/labelsTs
 (held-out test), plus dataset.json, splits_final.json (fold 0) and build_dataset.csv (one row per case).
 
-Who goes where:
-  test             TotalSegmentator's official test split and AMOS's official validation set; BTCV and FLARE22
-                   publish no labelled test set, so a seeded random 20% of each is held out instead
-  train/validation everything else, divided by nnU-Net's own default split (5 folds, seed 12345); fold 0 is used
+Who goes where. No dataset's published split is used. Within each source, scans are grouped by slice thickness
+and by total adrenal volume (see stratum()), and scikit-learn's StratifiedKFold divides every group evenly:
+  test        one fifth of all kept scans
+  validation  one fifth of the rest (fold 0 of five; all five folds are written, as nnU-Net expects)
+  train       everything else
+The mix of each part is logged and saved, so the balance can be checked rather than assumed.
 
 Each case is re-judged with step 1's rule and must get step 1's decision, so the two steps cannot drift apart.
 
@@ -21,20 +23,18 @@ import csv
 import gzip
 import json
 import logging
-import random
 import sys
 import zipfile
+from collections import Counter
 from multiprocessing import Pool
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 from scipy import ndimage
+from sklearn.model_selection import StratifiedKFold
 
 from cohort_scan import GLANDS, judge_gland, load_masks, sha256, voxel_volume_ml, write_csv
-
-sys.path.insert(0, str(Path(__file__).resolve().parent / 'vendor/nnUNet'))
-from nnunetv2.utilities.crossval_split import generate_crossval_split
 
 DATASET = 'Dataset902_AdrenalMultiorgan'
 # Label values in the written files. Adrenals are written last so they win where TotalSegmentator masks overlap.
@@ -42,8 +42,8 @@ LABELS = {'background': 0, 'adrenal_left': 1, 'adrenal_right': 2, 'kidney_left':
           'liver': 5, 'spleen': 6, 'aorta': 7, 'inferior_vena_cava': 8, 'pancreas': 9}
 WRITE_ORDER = ['liver', 'spleen', 'kidney_left', 'kidney_right', 'aorta', 'inferior_vena_cava', 'pancreas',
                'adrenal_left', 'adrenal_right']
-HELD_OUT_FRACTION = 0.2  # of BTCV and of FLARE22
-SEED = 12345  # the seed nnU-Net uses for its split
+SEED = 12345  # the seed nnU-Net uses for its own splits
+MINIMUM_GROUP = 10  # smallest stratum that is still divided separately
 
 log = logging.getLogger('build_dataset')
 
@@ -53,6 +53,11 @@ def largest_component(mask):
     if count <= 1:
         return mask
     return components == 1 + np.argmax(np.bincount(components.ravel())[1:])
+
+
+def case_name(row):
+    source, case = row['source'], row['case']
+    return case if case.lower().startswith(source) else f'{source}_{case}'  # ts_s0001, amos_0001, FLARE22_Tr_0001
 
 
 def image_path(source, case, official_split, folders):
@@ -66,7 +71,7 @@ def image_path(source, case, official_split, folders):
 def build_case(job):
     row, role, folders, out = job
     source, case = row['source'], row['case']
-    name = case if case.lower().startswith(source) else f'{source}_{case}'  # ts_s0001, amos_0001, FLARE22_Tr_0001
+    name = case_name(row)
     suffix = 'Ts' if role == 'test' else 'Tr'
     image_out = out / f'images{suffix}' / f'{name}_0000.nii.gz'
     label_out = out / f'labels{suffix}' / f'{name}.nii.gz'
@@ -113,14 +118,29 @@ def build_case(job):
         return {'name': name, 'source': source, 'case': case, 'role': 'failed', 'error': repr(error)}
 
 
-def test_cases(rows):
-    """(source, case) of every held-out scan among the kept rows."""
-    held_out = {(r['source'], r['case']) for r in rows
-                if (r['source'], r['official_split']) in (('ts', 'test'), ('amos', 'val'))}
-    for source in ('btcv', 'flare'):
-        cases = sorted(r['case'] for r in rows if r['source'] == source)  # sorted: the draw ignores input order
-        held_out |= {(source, c) for c in random.Random(SEED).sample(cases, round(len(cases) * HELD_OUT_FRACTION))}
-    return held_out
+def thickness_group(row):
+    thickness = float(row['slice_thickness_mm'])
+    return '<=2 mm' if thickness <= 2 else '2-4 mm' if thickness <= 4 else '>4 mm'
+
+
+def stratum_labels(rows):
+    """One grouping label per scan: source | slice thickness | total adrenal volume (thirds of the scans that have adrenals).
+    A group too small to spread over five folds falls back to source | volume, then to the source alone."""
+    volumes = [float(r['adrenal_left_largest_ml']) + float(r['adrenal_right_largest_ml']) for r in rows]
+    low, high = np.quantile([v for v in volumes if v > 0], [1 / 3, 2 / 3])
+    levels = []
+    for row, volume in zip(rows, volumes):
+        size = 'none' if volume == 0 else 'small' if volume <= low else 'medium' if volume <= high else 'large'
+        levels.append((f"{row['source']}|{thickness_group(row)}|{size}", f"{row['source']}|{size}", row['source']))
+    counts = Counter(label for level in levels for label in level)
+    return [next((label for label in level if counts[label] >= MINIMUM_GROUP), level[-1]) for level in levels]
+
+
+def five_folds(rows):
+    """[(indices of four fifths, indices of one fifth), ...], every stratum spread evenly over the fifths."""
+    rows = sorted(rows, key=lambda r: (r['source'], r['case']))  # the result must not depend on input order
+    folds = StratifiedKFold(5, shuffle=True, random_state=SEED).split(rows, stratum_labels(rows))
+    return [([rows[i] for i in most], [rows[i] for i in fifth]) for most, fifth in folds]
 
 
 def main():
@@ -146,7 +166,9 @@ def main():
     kept = [r for r in scanned if r['scan'].startswith('kept') and folders[r['source']]]
     log.info('%d scanned, %d kept by step 1 from the sources given, %d excluded or failed there',
              len(scanned), len(kept), len(scanned) - len(kept))
-    held_out = test_cases(kept)  # before --limit, so a quick test gives each case the role it has in the full run
+    development, test = five_folds(kept)[0]  # before --limit, so a quick test gives each case its full-run role
+    held_out = {(r['source'], r['case']) for r in test}
+    folds = five_folds(development)
     if args.limit:
         kept = [r for s in folders for r in [k for k in kept if k['source'] == s][:args.limit]]
 
@@ -169,8 +191,9 @@ def main():
         # AtlasNet's reader. Also needed because some TotalSegmentator CTs have orientation matrices that are
         # skewed by about 1e-4, which the default SimpleITK reader refuses to open.
         'overwrite_image_reader_writer': 'NibabelIOWithReorient'}, indent=2))
-    # The split nnU-Net would create by itself at the first training run, written now so it is part of the dataset.
-    splits = generate_crossval_split(names['train'])
+    written = set(names['train'])
+    splits = [{'train': [n for n in map(case_name, most) if n in written], 'val': [n for n in map(case_name, fifth) if n in written]}
+              for most, fifth in folds]
     preprocessed = args.out / 'nnUNet_preprocessed' / DATASET
     preprocessed.mkdir(parents=True, exist_ok=True)
     (preprocessed / 'splits_final.json').write_text(json.dumps(splits, indent=2))
@@ -179,8 +202,19 @@ def main():
     for source in folders:
         log.info('%-5s ' + '  '.join(f'{role} %4d' for role in names), source,
                  *[sum(r['source'] == source and r['role'] == role for r in rows) for role in names])
-    record = {'scan_csv_sha256': sha256(args.scan), 'split': 'nnU-Net default: 5 folds, seed 12345',
-              'held_out_fraction_btcv_flare': HELD_OUT_FRACTION, 'held_out_seed': SEED,
+    # The balance of each part, over all kept scans (not only those written when --limit is used).
+    parts = {'test': test, 'validation (fold 0)': folds[0][1], 'train (fold 0)': folds[0][0]}
+    label_of = dict(zip(map(case_name, kept), stratum_labels(kept)))
+    mix = {part: dict(sorted(Counter(label_of[case_name(r)] for r in members).items())) for part, members in parts.items()}
+    for part, members in parts.items():
+        volumes = [float(r['adrenal_left_largest_ml']) + float(r['adrenal_right_largest_ml']) for r in members]
+        present = [v for v in volumes if v > 0]
+        log.info('%-20s %4d scans | with adrenals %4d, median total adrenal volume %.2f mL | slice thickness: %s', part,
+                 len(members), len(present), float(np.median(present)) if present else 0,
+                 dict(sorted(Counter(map(thickness_group, members)).items())))
+    record = {'scan_csv_sha256': sha256(args.scan), 'seed': SEED,
+              'split': 'StratifiedKFold(5): fold 0 of all kept scans is the test set; the rest is divided again for training',
+              'scans_per_stratum': mix,
               'labels': LABELS, 'counts': {role: len(n) for role, n in names.items()},
               'build_dataset_csv_sha256': sha256(raw / 'build_dataset.csv')}
     (raw / 'build_dataset.json').write_text(json.dumps(record, indent=2))
@@ -195,12 +229,17 @@ def self_check():
     gland[10, 10, 10] = True  # speckle
     cleaned = largest_component(gland)
     assert cleaned.sum() == 125 and not cleaned[10, 10, 10]
-    rows = [{'source': 'btcv', 'case': f'label{i:04}', 'official_split': 'train'} for i in range(30)]
-    rows += [{'source': 'ts', 'case': 's0001', 'official_split': 'val'}, {'source': 'ts', 'case': 's0002', 'official_split': 'test'},
-             {'source': 'amos', 'case': 'amos_0001', 'official_split': 'val'}]
-    held_out = test_cases(rows)
-    assert len(held_out) == 8 and {('ts', 's0002'), ('amos', 'amos_0001')} <= held_out and ('ts', 's0001') not in held_out
-    assert held_out == test_cases(rows[::-1])  # the draw does not depend on input order
+    rows = [{'source': source, 'case': f'{source}_{thickness}_{i:03}', 'slice_thickness_mm': thickness,
+             'adrenal_left_largest_ml': i % 7, 'adrenal_right_largest_ml': i % 5}
+            for source, thickness, count in (('ts', 1.5, 200), ('amos', 5.0, 60), ('amos', 1.25, 40), ('btcv', 3.0, 30))
+            for i in range(count)]
+    development, test = five_folds(rows)[0]
+    assert len(test) == 66 and len(development) == 264
+    share = lambda members, source: sum(r['source'] == source for r in members) / len(members)
+    assert all(abs(share(test, s) - share(rows, s)) < 0.01 for s in ('ts', 'amos', 'btcv'))  # every source is one fifth
+    thick = lambda members: sum(r['slice_thickness_mm'] == 5.0 for r in members)
+    assert abs(thick(test) - 12) <= 1  # one fifth of the 60 thick-slice scans, up to rounding within strata
+    assert [r['case'] for r in test] == [r['case'] for r in five_folds(rows[::-1])[0][1]]  # input order is irrelevant
 
 if __name__ == '__main__':
     self_check()

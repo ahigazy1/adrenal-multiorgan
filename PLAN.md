@@ -24,7 +24,8 @@ Data preparation (download, cleaning, preprocessing, publishing the cache to Hug
 | Resampling | SimpleITK for both: `resample_data_or_seg_to_shape_sitk` prepares CT and labels for the training cache and CT at inference; `resample_logits_to_shape_sitk` brings the network output back to the original grid |
 | CT intensity normalization | AtlasNet's, unchanged: clip to [-1000, 629] HU, subtract -182.95, divide by 406.48 (the values stored in `atlasnet_plans.json`). They are not recomputed from our data, because the transferred weights expect inputs on this scale |
 | Image reader | nnU-Net's `NibabelIOWithReorient`, as in AtlasNet's plans |
-| Train/validation split | nnU-Net's default (5 folds, seed 12345) over all non-test scans, fold 0; validation is used for monitoring and for choosing the best checkpoint |
+| Test, validation, training | 20% / 16% / 64% of the kept scans of every source, stratified by slice thickness and adrenal volume (see below); validation is used for monitoring and for choosing the best checkpoint |
+| Cache | private Hugging Face dataset `ahigazy1/adrenal-multiorgan-cache` |
 | Checkpoints | every 100 epochs, plus the best (by nnU-Net's validation Dice moving average); uploaded to Hugging Face every 100 epochs |
 
 ### Adrenal label cleaning rule
@@ -43,15 +44,16 @@ Excluding the whole scan (rather than masking one gland) keeps the rule one sent
 
 It is nnU-Net's own fine-tuning recipe, unchanged (`PretrainedTrainer` and `nnUNetTrainer_warmup` in the vendored code: SGD, peak 1e-3 when pretrained weights are loaded versus 1e-2 from scratch, 50 warmup epochs, offset polynomial decay). Not chosen: a higher peak (in preliminary 100-epoch runs 5e-3 was ahead of 1e-3 only within single-run noise, and the reason for it, too few updates, does not apply to 2000 epochs); scaling the rate with batch size (nnU-Net never does); cosine schedules, restarts, layer-wise rates or freezing (not standard in nnU-Net, no evidence they are needed).
 
-### Held-out test set
+### Held-out test set and training split
 
-Each dataset's official split is used where one exists, so the choice is not ours:
+No dataset's published split is used. All kept scans are divided by one rule, so every source contributes the same share and the parts have the same mix:
 
-- TotalSegmentator: the 89 `test` cases in its `meta.csv`; its 1082 train and 57 val cases are used for training.
-- AMOS22 CT: the official validation set (100 scans) is our test set; the 200 official training scans are used for training. AMOS test labels are not public.
-- BTCV and FLARE22: no labelled test set is public, so a seeded random 20% of each (after the cleaning rule) is held out: about 6 and 10 scans.
+- Scans are grouped by source, slice thickness (<=2 mm, 2-4 mm, >4 mm; the coarsest voxel axis) and total adrenal volume (none, or the lower, middle or upper third of scans that have adrenals). Groups with fewer than 10 scans fall back to source and volume, then to source alone.
+- scikit-learn's `StratifiedKFold` (5 folds, shuffled, seed 12345) divides every group evenly. One fifth of all kept scans is the held-out test set.
+- The remaining four fifths are divided the same way into five folds for nnU-Net; fold 0 is trained, so its validation part is one fifth of the remainder (16% of all scans) and its training part is 64%.
+- `build_dataset.py` logs and saves the size, adrenal-volume median, slice-thickness mix and per-group counts of each part.
 
-Adrenal metrics are reported on the test scans that contain adrenals after the cleaning rule. Limitation: AtlasNet was pretrained on AbdomenAtlas, which is assembled from public datasets that include these three, so the test set is held out from our fine-tuning but not necessarily from pretraining.
+TotalSegmentator is distributed at 1.5 mm isotropic, so slice-thickness variety comes from AMOS, BTCV and FLARE22 only. Because published test splits are not used, results are not directly comparable with numbers other papers report on those splits. Limitation that stays: AtlasNet was pretrained on AbdomenAtlas, which is assembled from public datasets that include these four, so the test set is held out from our fine-tuning but not necessarily from pretraining.
 
 ## Labels in each dataset
 
@@ -79,12 +81,11 @@ About one in seven TotalSegmentator CTs in a local sample has an orientation mat
 
 ### Note on the CT intensity window
 
-AtlasNet's window is wide because its foreground included lungs and air. nnU-Net's own rule applied to our nine organs would give roughly [-55, 352] HU (estimate from 6 local cases). Arguments for keeping AtlasNet's: the transferred weights were trained with it; it is what nnU-Net's plan transfer does; fat around the adrenal (about -100 HU) stays inside the window, whereas a [-55, 352] window would clip it and reduce the fat-to-gland contrast; and the network's first layer is followed by instance normalization, which removes any overall rescaling of the input, so a wide window does not by itself weaken soft-tissue contrast. Argument for narrowing: values outside the abdomen's range carry no information for these organs. Changing it means the pretrained first layers see differently clipped images and must re-adapt. This is untested here; if it matters it should be settled by a short paired experiment, not by argument.
+Decided: keep AtlasNet's [-1000, 629] HU. The window is wide because AtlasNet's foreground included lungs and air; nnU-Net's own rule applied to our nine organs would give roughly [-55, 352] HU (estimate from 6 local scans). Reasons to keep it: the transferred weights were trained with it; nnU-Net's plan transfer carries it over; fat around the adrenal (about -100 HU) stays inside the window, whereas [-55, 352] would clip it; and the first convolution is followed by instance normalization, which removes any overall rescaling of the input. The effect of a narrower window was not tested.
 
 ## Open
 
 1. Redistribution terms of BTCV and of FLARE22 (research-only labels), before any files derived from them are made public.
-3. CT intensity window: keep AtlasNet's [-1000, 629] HU (current choice) or train with a narrower soft-tissue window. See the note below.
 2. Confirm the nnU-Net plans for the new dataset keep AtlasNet's architecture so its weights load.
 
 ## Work items
