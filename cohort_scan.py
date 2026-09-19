@@ -76,20 +76,31 @@ def judge_gland(mask, voxel_ml):
     return ('keep_despeckled' if count > 1 else 'keep'), volumes
 
 
+_open_zips = {}
+
+
+def open_zip(path):
+    """The TotalSegmentator zip holds 147,000 files; reading its index takes a moment, so each worker process opens
+    it once and keeps it open instead of once per case."""
+    if path not in _open_zips:
+        _open_zips[path] = zipfile.ZipFile(path)
+    return _open_zips[path]
+
+
 def load_masks(source, case, official_split, folders):
     """Read one case's labels. Returns (label image, {organ: boolean mask}); folders = {'ts': zip, 'amos': dir, ...}."""
     if source == 'ts':
-        with zipfile.ZipFile(folders['ts']) as archive:
-            def read(structure):
-                return nib.Nifti1Image.from_bytes(gzip.decompress(archive.read(f'{case}/segmentations/{structure}.nii.gz')))
-            images = {s: read(s) for files in TS_FILES.values() for s in files}
-            reference = images['liver']
-            for structure, image in images.items():  # every mask must sit on the same grid
-                if image.shape != reference.shape or not np.allclose(image.affine, reference.affine, atol=1e-3):
-                    raise ValueError(f'{structure} is on a different grid than liver')
-            masks = {organ: np.any([np.asanyarray(images[s].dataobj) > 0 for s in files], axis=0)
-                     for organ, files in TS_FILES.items()}
-            return reference, masks
+        archive = open_zip(folders['ts'])
+        def read(structure):
+            return nib.Nifti1Image.from_bytes(gzip.decompress(archive.read(f'{case}/segmentations/{structure}.nii.gz')))
+        images = {s: read(s) for files in TS_FILES.values() for s in files}
+        reference = images['liver']
+        for structure, image in images.items():  # every mask must sit on the same grid
+            if image.shape != reference.shape or not np.allclose(image.affine, reference.affine, atol=1e-3):
+                raise ValueError(f'{structure} is on a different grid than liver')
+        masks = {organ: np.any([np.asanyarray(images[s].dataobj) > 0 for s in files], axis=0)
+                 for organ, files in TS_FILES.items()}
+        return reference, masks
     image = nib.load(label_path(source, case, official_split, folders))
     labels = np.asanyarray(image.dataobj)
     return image, {organ: labels == value for organ, value in LABEL_IDS[source].items()}

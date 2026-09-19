@@ -21,6 +21,7 @@ Usage:
 import argparse
 import csv
 import gzip
+import io
 import json
 import logging
 import sys
@@ -34,7 +35,7 @@ import numpy as np
 from scipy import ndimage
 from sklearn.model_selection import StratifiedKFold
 
-from cohort_scan import GLANDS, judge_gland, load_masks, sha256, voxel_volume_ml, write_csv
+from cohort_scan import GLANDS, judge_gland, load_masks, open_zip, sha256, voxel_volume_ml, write_csv
 
 DATASET = 'Dataset902_AdrenalMultiorgan'
 # Label values in the written files. Adrenals are written last so they win where TotalSegmentator masks overlap.
@@ -81,16 +82,18 @@ def build_case(job):
     try:
         reference, masks = load_masks(source, case, row['official_split'], folders)
         if source == 'ts':
-            with zipfile.ZipFile(folders['ts']) as archive:
-                image_bytes = archive.read(f'{case}/ct.nii.gz')
+            image_bytes = open_zip(folders['ts']).read(f'{case}/ct.nii.gz')
         else:
             image_bytes = image_path(source, case, row['official_split'], folders).read_bytes()
 
         # The CT and its labels must describe the same grid. The label file is then written with the CT's own
         # affine, so a reader that reorients by header (nnU-Net's NibabelIOWithReorient) treats both identically.
-        image = nib.Nifti1Image.from_bytes(gzip.decompress(image_bytes))
-        if image.shape[:3] != reference.shape[:3] or not np.allclose(image.affine, reference.affine, atol=1e-3):
-            raise ValueError(f'image grid {image.shape} and label grid {reference.shape} differ')
+        # Only the CT's header is needed for this, so only its first bytes are decompressed.
+        header_bytes = gzip.GzipFile(fileobj=io.BytesIO(image_bytes)).read(348)
+        ct = nib.Nifti1Header.from_fileobj(io.BytesIO(header_bytes))
+        ct_shape, ct_affine = ct.get_data_shape(), ct.get_best_affine()
+        if ct_shape[:3] != reference.shape[:3] or not np.allclose(ct_affine, reference.affine, atol=1e-3):
+            raise ValueError(f'image grid {ct_shape} and label grid {reference.shape} differ')
 
         voxel_ml = voxel_volume_ml(reference)
         removed_ml = {}
@@ -105,11 +108,14 @@ def build_case(job):
         labels = np.zeros(reference.shape[:3], np.uint8)
         for organ in WRITE_ORDER:
             labels[masks[organ]] = LABELS[organ]
-        overlap_voxels = int((np.sum(list(masks.values()), axis=0) > 1).sum())
+        covered = np.zeros(reference.shape[:3], np.uint8)  # how many organ masks claim each voxel
+        for mask in masks.values():
+            covered += mask
+        overlap_voxels = int((covered > 1).sum())
 
         header = reference.header.copy()
         header.set_data_dtype(np.uint8)
-        nib.save(nib.Nifti1Image(labels, image.affine, header), label_out)
+        nib.save(nib.Nifti1Image(labels, ct_affine, header), label_out)
         image_out.write_bytes(image_bytes)
         return {'name': name, 'source': source, 'case': case, 'role': role,
                 'speckle_removed_left_ml': removed_ml['adrenal_left'],
