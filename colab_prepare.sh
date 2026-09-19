@@ -27,7 +27,8 @@ hf download MedOtter/amos22-ct-dataset --repo-type dataset --revision c67f7c01e6
     --include "train/*" --include "valid/*" --local-dir "$DATA/amos"
 hf download lingheng123/btcv --repo-type dataset --revision c1728b451a00c054875a0a97d7658d1eaf8362b5 \
     --include "RawData/Training/*" --local-dir "$DATA/btcv"
-hf download MedOtter/FLARE22 --repo-type dataset --revision ab0b99b53e2183fe59321b5888867c6c7cb0792a \n    --include "images/*" --include "labels/*" --local-dir "$DATA/flare"
+hf download MedOtter/FLARE22 --repo-type dataset --revision ab0b99b53e2183fe59321b5888867c6c7cb0792a \
+    --include "images/*" --include "labels/*" --local-dir "$DATA/flare"
 
 python cohort_scan.py --out results --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --flare "$DATA/flare" --workers "$(nproc)"
 python build_dataset.py --scan results/cohort_scan.csv --out "$DATA" --ts "$TS" --amos "$DATA/amos" --btcv "$DATA/btcv" --flare "$DATA/flare" --workers "$(nproc)"
