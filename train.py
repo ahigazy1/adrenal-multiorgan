@@ -56,28 +56,22 @@ def has_checkpoint():
 
 
 def fetch_model_from_hugging_face():
-    from huggingface_hub import snapshot_download
+    """Download this run's checkpoints if there are any. The repository is created first, so a wrong or missing login
+    fails here, loudly. It must never look like "no checkpoint yet": that would start again from AtlasNet and later
+    upload over the real run."""
+    from huggingface_hub import create_repo, snapshot_download
     log.info('No checkpoint on this disk; looking on Hugging Face (%s)', os.environ['ADRENAL_HF_REPO'])
-    try:
-        snapshot_download(os.environ['ADRENAL_HF_REPO'], local_dir=DATA / 'nnUNet_results' / DATASET,
-                          allow_patterns=[f'{MODEL_FOLDER.name}/*'])
-    except Exception as error:  # a repository that does not exist yet simply means a first start
-        log.info('Nothing downloaded: %r', error)
+    create_repo(os.environ['ADRENAL_HF_REPO'], private=True, exist_ok=True)
+    snapshot_download(os.environ['ADRENAL_HF_REPO'], local_dir=DATA / 'nnUNet_results' / DATASET,
+                      allow_patterns=[f'{MODEL_FOLDER.name}/*'])
 
 
 def build_sampling_index():
-    """nnU-Net's index of where each organ is, used to pick training patches. It is built from the label files of the
-    whole cache, so it is made here, after the download, by nnU-Net's own function."""
-    from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_for_folder
-    from nnunetv2.training.dataloading.foreground_locations import FG_SAMPLING_DIRNAME
-    from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
-    preprocessed = DATA / 'nnUNet_preprocessed' / DATASET
-    plans = PlansManager(str(preprocessed / f'{PLANS}.json'))
-    cache = preprocessed / plans.get_configuration(CONFIGURATION).data_identifier
-    if not (cache / FG_SAMPLING_DIRNAME).exists():
-        log.info('Building the patch-sampling index (once, a few minutes)')
-        labels = plans.get_label_manager(json.loads((preprocessed / 'dataset.json').read_text()))
-        extract_sampling_locations_for_folder(str(cache), labels.classes_or_regions_for_sampling)
+    """nnU-Net's index of where each organ is, used to pick training patches. It needs the label files of the whole
+    cache, so it is made here, after the download, by nnU-Net's own function. overwrite=False skips a finished index
+    and rebuilds one that an interruption left half-written."""
+    from nnunetv2.preprocessing.sampling_locations.extract_sampling_locations import extract_sampling_locations_dataset
+    extract_sampling_locations_dataset(DATASET, PLANS, configurations=(CONFIGURATION,), overwrite=False)
 
 
 def run_record():
