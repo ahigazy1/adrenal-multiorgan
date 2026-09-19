@@ -7,6 +7,7 @@ and the resulting decision. The rule (see PLAN.md):
     gland absent                            -> absent             (scan kept)
     a secondary component >= 0.3 mL         -> exclude_fragmented (scan excluded)
     largest component <= 1 mL               -> exclude_small      (scan excluded)
+    gland touches an edge of the scan       -> exclude_truncated  (scan excluded)
     secondary components all < 0.3 mL       -> keep_despeckled    (speckles removed later)
     exactly one component > 1 mL            -> keep
 
@@ -65,6 +66,8 @@ def judge_gland(mask, voxel_ml):
         return 'exclude_fragmented', volumes
     if volumes[0] <= MINIMUM_ML:
         return 'exclude_small', volumes
+    if any(mask.take(index, axis=axis).any() for axis in range(3) for index in (0, -1)):
+        return 'exclude_truncated', volumes  # cut by the edge of the scan: its volume is not the gland's volume
     return ('keep_despeckled' if count > 1 else 'keep'), volumes
 
 
@@ -85,6 +88,19 @@ def load_masks(source, case, official_split, folders):
     image = nib.load(label_path(source, case, official_split, folders))
     labels = np.asanyarray(image.dataobj)
     return image, {organ: labels == value for organ, value in LABEL_IDS[source].items()}
+
+
+def check_sides(image, masks):
+    """'ok', or which organs are on the wrong side of the body. Positions are taken in world coordinates, where
+    nibabel's x axis points to the patient's right (RAS+), so this catches swapped left/right labels, a wrong orientation
+    in the file header, and mirrored anatomy (situs inversus). Organs that are absent are not checked."""
+    def world_x(organ):
+        centre = ndimage.center_of_mass(masks[organ])
+        return (image.affine @ [*centre, 1])[0]
+    wrong = [f'{left} is not left of {right}'
+             for left, right in (('adrenal_left', 'adrenal_right'), ('kidney_left', 'kidney_right'), ('spleen', 'liver'))
+             if masks[left].any() and masks[right].any() and world_x(left) >= world_x(right)]
+    return '; '.join(wrong) or 'ok'
 
 
 def label_path(source, case, official_split, folders):
@@ -113,8 +129,9 @@ def scan_case(job):
             row[gland + '_second_ml'] = round(volumes[1], 4) if len(volumes) > 1 else 0
         for organ in OTHER_ORGANS:
             row[organ + '_ml'] = round(float(masks[organ].sum()) * voxel_ml, 2)
+        row['sides'] = check_sides(image, masks)
         decisions = {row[gland] for gland in GLANDS}
-        if any(d.startswith('exclude') for d in decisions):
+        if row['sides'] != 'ok' or any(d.startswith('exclude') for d in decisions):
             row['scan'] = 'excluded'
         elif decisions == {'absent'}:
             row['scan'] = 'kept_no_adrenal'
@@ -202,19 +219,26 @@ def self_check():
     """Tiny synthetic examples of every branch of the rule, at 1 mm voxels (0.001 mL)."""
     gland = np.zeros((30, 30, 30), bool)
     assert judge_gland(gland, 0.001)[0] == 'absent'
-    gland[:10, :10, :10] = True  # exactly 1.0 mL is not > 1 mL
+    gland[1:11, 1:11, 1:11] = True  # exactly 1.0 mL is not > 1 mL
     assert judge_gland(gland, 0.001)[0] == 'exclude_small'
-    gland[:11, :10, :10] = True  # 1.1 mL
+    gland[1:12, 1:11, 1:11] = True  # 1.1 mL
     assert judge_gland(gland, 0.001)[0] == 'keep'
     gland[20, 20, 20] = True  # one-voxel speckle
     assert judge_gland(gland, 0.001)[0] == 'keep_despeckled'
     gland[20:27, 20:27, 20:27] = True  # 0.343 mL second component
     assert judge_gland(gland, 0.001)[0] == 'exclude_fragmented'
     labels = np.zeros((30, 30, 30), np.uint8)  # multi-label file, as in AMOS
-    labels[:11, :10, :10] = LABEL_IDS['amos']['adrenal_left']
+    labels[1:12, 1:11, 1:11] = LABEL_IDS['amos']['adrenal_left']
     assert judge_gland(labels == LABEL_IDS['amos']['adrenal_left'], 0.001)[0] == 'keep'
     assert judge_gland(labels == LABEL_IDS['amos']['adrenal_right'], 0.001)[0] == 'absent'
     assert all(set(ids) == set(GLANDS + OTHER_ORGANS) for ids in LABEL_IDS.values())  # every source maps all 9
+    gland[20:27, 20:27, 20:27] = False  # back to one gland, then extend it to the edge of the volume
+    gland[0, 5, 5] = True
+    assert judge_gland(gland, 0.001)[0] == 'exclude_truncated'
+    body = {organ: np.zeros((30, 30, 30), bool) for organ in GLANDS + OTHER_ORGANS}
+    body['kidney_left'][5:10, 10:15, 10:15] = body['kidney_right'][20:25, 10:15, 10:15] = True  # x grows to the right
+    ras, lps = nib.Nifti1Image(np.zeros((30, 30, 30)), np.eye(4)), nib.Nifti1Image(np.zeros((30, 30, 30)), np.diag([-1., -1, 1, 1]))
+    assert check_sides(ras, body) == 'ok' and check_sides(lps, body) == 'kidney_left is not left of kidney_right'
 
 if __name__ == '__main__':
     self_check()

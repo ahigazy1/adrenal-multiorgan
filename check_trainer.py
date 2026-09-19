@@ -68,10 +68,16 @@ transforms = trainer.get_training_transforms(patch, (-0.5, 0.5), None, None, do_
                                              foreground_labels=trainer.label_manager.foreground_labels).transforms
 kinds = [type(getattr(t, 'transform', t)) for t in transforms]
 assert not set(kinds) & {GaussianNoiseTransform, GaussianBlurTransform, SimulateLowResolutionTransform, MirrorTransform}
+from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
+from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+spatial = next(t for t in transforms if isinstance(t, SpatialTransform))
+stock = next(t for t in nnUNetTrainer.get_training_transforms(patch, (-0.5, 0.5), None, None, do_dummy_2d_data_aug=False,
+             foreground_labels=trainer.label_manager.foreground_labels).transforms if isinstance(t, SpatialTransform))
+assert set(vars(spatial)) == set(vars(stock))  # no attribute was invented by a misspelt name
+assert (spatial.p_rotation, spatial.p_scaling, spatial.scaling) == (0.1, 0.1, (0.9, 1.1)) and stock.p_rotation != 0.1
 # Checkpoints: written under the final name only (no leftover .tmp), and an upload is attempted at epoch 100, not 99.
 # (nnU-Net's own save and logging are replaced by stand-ins: building the real network needs the dataset.)
 import adrenal_multiorgan
-from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 nnUNetTrainer.save_checkpoint = lambda self, filename: Path(filename).write_text('weights')
 checkpoint = os.path.join(scratch, 'checkpoint_latest.pth')
 trainer.save_checkpoint(checkpoint)

@@ -35,10 +35,12 @@ Applied per gland, to every source, in training and test data. Connected compone
 1. Gland absent: the scan is kept.
 2. Secondary components smaller than 0.3 mL are speckles and are removed.
 3. A secondary component of 0.3 mL or more means the label is broken: the whole scan is excluded.
-4. The remaining component must be larger than 1 mL, otherwise the whole scan is excluded (typically a gland cut by the edge of the scan).
-5. Every removal and exclusion is recorded per case.
+4. The remaining component must be larger than 1 mL, otherwise the whole scan is excluded.
+5. A gland that touches any edge of the scan volume is cut off, so its volume is not the gland's volume: the whole scan is excluded.
+6. Left/right check, in world coordinates: the left adrenal and left kidney must lie to the patient's left of the right ones, and the spleen to the left of the liver (only organs that are present are compared). A scan that fails is excluded. This catches swapped labels, a wrong orientation in the file header and mirrored anatomy.
+7. Every removal and exclusion is recorded per case.
 
-Excluding the whole scan (rather than masking one gland) keeps the rule one sentence long. A local test on TotalSegmentator suggests it costs about 8% of that dataset.
+Excluding the whole scan (rather than masking one gland) keeps the rule one sentence long. In a local test on 150 TotalSegmentator scans, rules 3-5 together excluded 17% (rules 3-4 alone about 8%); none failed the left/right check.
 
 ### Learning-rate schedule: why this one
 

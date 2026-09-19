@@ -14,7 +14,6 @@ Scans that are already in the repository are skipped, so after an interruption j
 Needs `pip install -e vendor/nnUNet` and a Hugging Face login with write access (`hf auth login`).
 """
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -22,6 +21,8 @@ import shutil
 import zipfile
 from multiprocessing import get_context
 from pathlib import Path
+
+from cohort_scan import sha256
 
 REPOSITORY = 'ahigazy1/adrenal-multiorgan-cache'
 DATASET = 'Dataset902_AdrenalMultiorgan'
@@ -32,6 +33,7 @@ ATLASNET = {'repo': 'AbdomenAtlas/AtlasNet', 'revision': 'fd03b410350096da9bc743
             'source_plans': 'nnUNetPlannerResEncL_torchres_isotropic',
             'checkpoint': 'nnUNetTrainer__nnUNetPlannerResEncL_torchres_isotropic__3d_fullres/fold_all/checkpoint_final.pth',
             'checkpoint_sha256': '73ff6cb8e09bbe0c7ad5097d10c281ef4a757c7740ef00b15ee683e907b3e37e'}
+os.environ.setdefault('SITK_THREADS', '2')  # per worker process; the workers already fill the CPUs
 RESAMPLING = {  # SimpleITK for everything; see PLAN.md
     'resampling_fn_data': 'resample_data_or_seg_to_shape_sitk',
     'resampling_fn_data_kwargs': {'is_seg': False, 'order': 3, 'order_z': 0, 'force_separate_z': False},
@@ -68,9 +70,8 @@ def fetch_atlasnet_checkpoint(data):
             target.parent.mkdir(parents=True, exist_ok=True)
             with z.open(member) as source, open(target, 'wb') as out:
                 shutil.copyfileobj(source, out)
-    with open(target, 'rb') as stream:
-        if hashlib.file_digest(stream, 'sha256').hexdigest() != ATLASNET['checkpoint_sha256']:
-            raise SystemExit(f'{target} is not the expected AtlasNet checkpoint')
+    if sha256(target) != ATLASNET['checkpoint_sha256']:
+        raise SystemExit(f'{target} is not the expected AtlasNet checkpoint')
     return target
 
 
