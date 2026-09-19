@@ -38,7 +38,8 @@ Applied per gland, to every source, in training and test data. Connected compone
 4. The remaining component must be larger than 1 mL, otherwise the whole scan is excluded.
 5. A gland that touches any edge of the scan volume is cut off, so its volume is not the gland's volume: the whole scan is excluded.
 6. Left/right check, in world coordinates: the left adrenal and left kidney must lie to the patient's left of the right ones, and the spleen to the left of the liver (only organs that are present are compared). A scan that fails is excluded. This catches swapped labels, a wrong orientation in the file header and mirrored anatomy.
-7. Every removal and exclusion is recorded per case.
+7. Slice thickness (the coarsest voxel axis) over 5 mm: the scan is excluded.
+8. Every removal and exclusion is recorded per case.
 
 Excluding the whole scan (rather than masking one gland) keeps the rule one sentence long. In a local test on 150 TotalSegmentator scans, rules 3-5 together excluded 17% (rules 3-4 alone about 8%); none failed the left/right check.
 
@@ -50,7 +51,7 @@ It is nnU-Net's own fine-tuning recipe, unchanged (`PretrainedTrainer` and `nnUN
 
 No dataset's published split is used. All kept scans are divided by one rule, so every source contributes the same share and the parts have the same mix:
 
-- Scans are grouped by source, slice thickness (<=2 mm, 2-4 mm, >4 mm; the coarsest voxel axis) and total adrenal volume (none, or the lower, middle or upper third of scans that have adrenals). Groups with fewer than 10 scans fall back to source and volume, then to source alone.
+- Scans are grouped by source, slice thickness (<=2 mm, 2-4 mm, 4-5 mm; the coarsest voxel axis) and total adrenal volume (none, or the lower, middle or upper third of scans that have adrenals). Groups with fewer than 10 scans fall back to source and volume, then to source alone.
 - scikit-learn's `StratifiedKFold` (5 folds, shuffled, seed 12345) divides every group evenly. One fifth of all kept scans is the held-out test set.
 - The remaining four fifths are divided the same way into five folds for nnU-Net; fold 0 is trained, so its validation part is one fifth of the remainder (16% of all scans) and its training part is 64%.
 - `build_dataset.py` logs and saves the size, adrenal-volume median, slice-thickness mix and per-group counts of each part.

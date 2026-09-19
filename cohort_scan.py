@@ -8,6 +8,7 @@ and the resulting decision. The rule (see PLAN.md):
     a secondary component >= 0.3 mL         -> exclude_fragmented (scan excluded)
     largest component <= 1 mL               -> exclude_small      (scan excluded)
     gland touches an edge of the scan       -> exclude_truncated  (scan excluded)
+A scan is also excluded if its slice thickness is over 5 mm or an organ lies on the wrong side of the body.
     secondary components all < 0.3 mL       -> keep_despeckled    (speckles removed later)
     exactly one component > 1 mL            -> keep
 
@@ -33,6 +34,7 @@ from scipy import ndimage
 
 SPECKLE_ML = 0.3
 MINIMUM_ML = 1.0
+MAX_SLICE_MM = 5.0  # scans whose coarsest voxel axis is larger are excluded
 GLANDS = ('adrenal_left', 'adrenal_right')
 OTHER_ORGANS = ('kidney_left', 'kidney_right', 'liver', 'spleen', 'aorta', 'inferior_vena_cava', 'pancreas')
 
@@ -131,7 +133,7 @@ def scan_case(job):
             row[organ + '_ml'] = round(float(masks[organ].sum()) * voxel_ml, 2)
         row['sides'] = check_sides(image, masks)
         decisions = {row[gland] for gland in GLANDS}
-        if row['sides'] != 'ok' or any(d.startswith('exclude') for d in decisions):
+        if row['slice_thickness_mm'] > MAX_SLICE_MM or row['sides'] != 'ok' or any(d.startswith('exclude') for d in decisions):
             row['scan'] = 'excluded'
         elif decisions == {'absent'}:
             row['scan'] = 'kept_no_adrenal'

@@ -121,7 +121,7 @@ def build_case(job):
 
 def thickness_group(row):
     thickness = float(row['slice_thickness_mm'])
-    return '<=2 mm' if thickness <= 2 else '2-4 mm' if thickness <= 4 else '>4 mm'
+    return '<=2 mm' if thickness <= 2 else '2-4 mm' if thickness <= 4 else '4-5 mm'
 
 
 def stratum_labels(rows):
