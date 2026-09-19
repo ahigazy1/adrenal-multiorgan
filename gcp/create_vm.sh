@@ -19,6 +19,7 @@ NAME=adrenal-train
 DISK_GB=500          # downloads about 40 GB, cleaned dataset about 40 GB, preprocessed data about 200 GB
 DISK_IOPS=10000      # disk speed as in our test runs; it is a large part of the disk's price
 DISK_MB_PER_S=1050
+MAX_HOURS=100        # Google stops the machine after this long in one go, whatever it is doing: a ceiling on the bill
 IMAGE="image-family=ubuntu-pro-accel-2604-amd64-nvidia-595,image-project=ubuntu-os-accelerator-images"
 HERE=$(cd "$(dirname "$0")" && pwd)
 command -v cygpath >/dev/null && HERE=$(cygpath -m "$HERE")   # Git Bash on Windows: gcloud needs a Windows-style path
@@ -56,7 +57,7 @@ ZONES="us-central1-f us-central1-a us-central1-b us-central1-c"
 for ZONE in $ZONES; do
     echo "Trying $ZONE ... (up to two minutes, nothing is printed meanwhile)"
     if ERROR=$(gcloud compute instances create "$NAME" --zone="$ZONE" \
-        --machine-type=g4-standard-48 --provisioning-model=SPOT --instance-termination-action=STOP \
+        --machine-type=g4-standard-48 --provisioning-model=SPOT --instance-termination-action=STOP --max-run-duration="${MAX_HOURS}h" \
         --create-disk="auto-delete=no,boot=yes,size=$DISK_GB,type=hyperdisk-balanced,provisioned-iops=$DISK_IOPS,provisioned-throughput=$DISK_MB_PER_S,$IMAGE" \
         --network-interface=network=default,nic-type=GVNIC \
         --service-account="$ACCOUNT" --scopes=cloud-platform \
