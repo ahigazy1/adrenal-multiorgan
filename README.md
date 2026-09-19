@@ -7,7 +7,7 @@ The work is a short sequence of steps. Each step is one small script that logs w
 | Step | Script | What it does | Status |
 |---|---|---|---|
 | 1 | `cohort_scan.py`, `colab_scan.sh` | Measures every scan and applies the adrenal label cleaning rule | tested locally, not yet run on Colab |
-| 2 | (next) | Clean labels, merge to the 9-class map, write the train/test split | not written |
+| 2 | `build_dataset.py`, `colab_build.sh` | Writes the cleaned 9-class nnU-Net dataset and the train/validation/test split | tested locally on TotalSegmentator, not yet run on Colab |
 | 3 | (next) | nnU-Net preprocessing to 1.0 mm, publish the cache to Hugging Face | not written |
 | 4 | `train.py`, `trainers/adrenal_multiorgan.py` | Training on the GPU VM: one command, continues by itself | checked on CPU, not yet run on a GPU |
 | 5 | (next) | Evaluation on the held-out test set | not written |
@@ -30,6 +30,14 @@ This downloads TotalSegmentator v2.0.1 from Zenodo (23.6 GB, checksum verified) 
 - `cohort_scan.log` and `colab_scan.log`: everything printed during the run.
 
 To try it locally on a few cases: `python cohort_scan.py --out test-results --limit 40 --ts /path/to/Totalsegmentator_dataset_v201.zip`. The script runs a small self-check of the cleaning rule every time it starts.
+
+## Step 2: build the dataset
+
+```bash
+bash colab_build.sh
+```
+
+Run after step 1 on the same runtime. It downloads the AMOS and BTCV images, then writes `nnUNet_raw/Dataset902_AdrenalMultiorgan`: every CT that step 1 kept (bytes copied unchanged), one 9-class label file per CT with adrenal speckles removed, `dataset.json`, the fold-0 split, and `build_dataset.csv` with one row per case (role, speckle volume removed, overlapping voxels, labels present). Each gland is judged again with step 1's rule and must get step 1's decision, otherwise the case fails loudly. The test set is each dataset's own (see PLAN.md); validation is a seeded random 20% of the remaining scans of each source.
 
 ## Step 4: training
 

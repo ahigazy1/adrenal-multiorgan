@@ -1,6 +1,6 @@
 # Specification
 
-Last updated September 19, 2026. Status: steps 1 and 4 are written and checked on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
+Last updated September 19, 2026. Status: steps 1, 2 and 4 are written and checked on CPU; nothing has been run on Colab or a GPU yet. Results used for publication come only from logged Colab and GPU runs. Local runs are for testing code.
 
 ## Setup
 
@@ -21,6 +21,9 @@ Data preparation (download, cleaning, preprocessing, publishing the cache to Hug
 | Mirroring | none, in training or inference |
 | Augmentation | reduced: no blur, noise or simulated low resolution; rotation +/-10 degrees and scaling 0.9-1.1, each with probability 0.1 |
 | Loss | cross-entropy + focal Tversky (false negatives 0.6, false positives 0.4, exponent 0.75), deep supervision |
+| Resampling | SimpleITK for both: `resample_data_or_seg_to_shape_sitk` prepares CT and labels for the training cache and CT at inference; `resample_logits_to_shape_sitk` brings the network output back to the original grid |
+| Image reader | nnU-Net's `NibabelIOWithReorient`, as in AtlasNet's plans |
+| Validation set | seeded random 20% of the non-test scans of each source; used for monitoring and for choosing the best checkpoint |
 | Checkpoints | every 100 epochs, plus the best (by nnU-Net's validation Dice moving average); uploaded to Hugging Face every 100 epochs |
 
 ### Adrenal label cleaning rule
@@ -67,16 +70,21 @@ All other structures become background. Structures present in only two of the th
 
 Known differences between sources: TotalSegmentator labels the aorta and vena cava wherever they are in view, including the chest, while AMOS and BTCV are abdominal; TotalSegmentator is distributed at 1.5 mm, so its 1.0 mm version is upsampled.
 
+## Notes on resampling and reading
+
+The three resamplers available (nnU-Net's default, AtlasNet's `resample_torch_fornnunet`, SimpleITK) do not produce the same image: on a test volume the SimpleITK and default CT results differ by about 8% of the intensity standard deviation on average. So the same one must prepare the training cache and the images at inference; SimpleITK was chosen because deployment uses it. It has no separate handling of thick slices (one 3D resample). The SimpleITK logits resampler reproduces nnU-Net's default to float precision (max difference 5e-7, no label changes).
+
+About one in seven TotalSegmentator CTs in a local sample has an orientation matrix skewed by about 1e-4. ITK-based readers (nnU-Net's default `SimpleITKIO`) refuse these files; the nibabel reader opens them. `dataset.json` therefore names `NibabelIOWithReorient`. The CT files themselves are not altered.
+
 ## Open
 
-1. **Which resampler prepares the CT for the network.** The vendored code has three: nnU-Net's default, AtlasNet's own (`resample_torch_fornnunet`, what its weights were trained with), and the SimpleITK one (`resample_data_or_seg_to_shape_sitk`). They do not produce the same image: on a test volume the SimpleITK and default results differ by about 8% of the intensity standard deviation on average. Whatever prepares the training cache must also prepare images at inference. The SimpleITK *logits* resampler is different: it reproduces nnU-Net's default to float precision (max difference 5e-7, no label changes) and can be used at inference regardless.
-2. BTCV redistribution terms, before any BTCV-derived files are made public.
-3. Confirm the nnU-Net plans for the new dataset keep AtlasNet's architecture so its weights load.
+1. BTCV redistribution terms, before any BTCV-derived files are made public.
+2. Confirm the nnU-Net plans for the new dataset keep AtlasNet's architecture so its weights load.
 
 ## Work items
 
 1. Run `colab_scan.sh` on Colab: final inclusion table and counts.
-2. Step 2 script: clean labels, merge to the 9-class map, write the split.
+2. Run `colab_build.sh` on Colab: the cleaned dataset and split.
 3. Step 3 script: preprocess on Colab with resumable shards; publish cache and manifest to Hugging Face.
 4. Five-epoch timing test of `train.py` on the GPU VM, then the full run.
 5. Evaluation script for the held-out test set (Dice, surface Dice, signed and absolute volume error).
