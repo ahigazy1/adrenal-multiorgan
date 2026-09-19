@@ -1,8 +1,9 @@
 #!/bin/bash
 # Create the training machine on Google Cloud, or start it again after an interruption.
 #
-# Where to run it: Google Cloud Shell (console.cloud.google.com, the ">_" button at the top right). Nothing to
-# install. Pick your project in the console first, then paste these two lines:
+# Where to run it: any bash terminal with the Google Cloud CLI signed in (on Windows: Git Bash, not PowerShell), or
+# Google Cloud Shell (console.cloud.google.com, the ">_" button). Select the project first
+# (gcloud config set project PROJECT_ID), then paste these two lines:
 #
 #     git clone https://github.com/ahigazy1/adrenal-multiorgan
 #     bash adrenal-multiorgan/gcp/create_vm.sh
@@ -20,6 +21,7 @@ DISK_IOPS=10000      # disk speed as in our test runs; it is a large part of the
 DISK_MB_PER_S=1050
 IMAGE="image-family=ubuntu-pro-accel-2604-amd64-nvidia-595,image-project=ubuntu-os-accelerator-images"
 HERE=$(cd "$(dirname "$0")" && pwd)
+command -v cygpath >/dev/null && HERE=$(cygpath -m "$HERE")   # Git Bash on Windows: gcloud needs a Windows-style path
 PROJECT=$(gcloud config get-value project 2>/dev/null)
 [ -n "$PROJECT" ] || { echo "No project selected. Choose one in the console, or run: gcloud config set project YOUR_PROJECT"; exit 1; }
 echo "Project: $PROJECT"
