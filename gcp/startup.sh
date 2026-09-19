@@ -9,7 +9,7 @@
 #
 # To keep the machine on for a look around (no training, no switching off), set the metadata key "hold":
 #     gcloud compute instances add-metadata adrenal-train --zone=ZONE --metadata=hold=1     (remove-metadata --keys=hold to undo)
-exec > >(tee -a /var/log/adrenal.log) 2>&1
+exec > >(tee -a /var/log/adrenal.log | tr '\r' '\n') 2>&1
 echo "=== start $(date -u)"
 metadata() { curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/$1"; }
 if metadata instance/attributes/hold >/dev/null; then echo "hold is set: doing nothing"; exit 0; fi
@@ -20,9 +20,13 @@ export HOME=/root PATH=/root/.pixi/bin:$PATH
 export PIXI_LOCKED=true   # pixi must use pixi.lock exactly, never re-solve the environment
 export PYTHONUNBUFFERED=1 nnUNet_n_proc_DA=32 TORCHINDUCTOR_COMPILE_THREADS=16
 cd /opt
-# The code is cloned once and never updated: train.py refuses to continue a run whose code has changed.
+# The code is frozen once preparation is complete because train.py refuses to continue a run whose code changed.
+# While preparation is incomplete, pull main so preprocessing/restart fixes are picked up after an interruption.
 [ -d adrenal-multiorgan ] || git clone https://github.com/ahigazy1/adrenal-multiorgan
 cd adrenal-multiorgan
+if [ ! -f data/.prepared ]; then
+    git pull --ff-only origin main
+fi
 command -v pixi >/dev/null || curl -fsSL https://pixi.sh/install.sh | PIXI_NO_PATH_UPDATE=1 bash
 pixi install
 
