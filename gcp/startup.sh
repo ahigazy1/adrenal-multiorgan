@@ -17,7 +17,6 @@ export PIXI_LOCKED=true
 export PYTHONUNBUFFERED=1 nnUNet_n_proc_DA=32 TORCHINDUCTOR_COMPILE_THREADS=16
 export HF_HUB_DISABLE_PROGRESS_BARS=1
 export NUMEXPR_MAX_THREADS=48   # let numexpr use every core instead of its default cap of 16
-export NUMEXPR_MAX_THREADS=16   # only silences a start-up notice; numexpr is imported by blosc2 but does no work here
 cd /opt
 # Freeze the working checkout after preparation, so an existing experiment cannot silently change.
 [ -d adrenal-multiorgan ] || git clone https://github.com/ahigazy1/adrenal-multiorgan
