@@ -113,6 +113,7 @@ def check_manifest(value: dict, kind: str, recipe: str | None = None) -> dict:
     return value
 
 
+RETRY_SECONDS = 60  # pause before a failed checkpoint upload is tried again (grows with each attempt)
 HASH_THREADS = 16  # hashlib releases the GIL, so threads hash in parallel; beyond this the disk is the limit
 
 
@@ -409,7 +410,16 @@ def publish_model(model_folder: Path, message: str, hub=None) -> str:
     revision, _ = hub.info()
     additions = {f'{model_folder.name}/{name}': safe_path(model_folder, name) for name in files}
     additions[f'{model_folder.name}/{SNAPSHOT}'] = encoded(value)
-    return hub.commit(additions, f'{model_folder.name}: {message}', revision)
+    # One failed attempt must not mean "no backup for the next 100 epochs": try again with growing pauses.
+    for attempt in range(1, 5):
+        try:
+            return hub.commit(additions, f'{model_folder.name}: {message}', revision)
+        except Exception as error:
+            if attempt == 4:
+                raise
+            log.warning('Checkpoint upload failed (attempt %d of 4), retrying: %r', attempt, error)
+            time.sleep(RETRY_SECONDS * attempt)
+            revision, _ = hub.info()
 
 
 def restore_model(model_folder: Path, expected_record: dict, hub=None) -> bool:

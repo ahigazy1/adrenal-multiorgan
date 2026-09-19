@@ -15,6 +15,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import hf_cache as cache
 
+cache.RETRY_SECONDS = 0  # no real pauses in tests
+
 
 class FakeHub:
     def __init__(self):
