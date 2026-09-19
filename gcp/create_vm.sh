@@ -49,11 +49,10 @@ ACCOUNT="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-
 gcloud secrets add-iam-policy-binding HF_TOKEN --member="serviceAccount:$ACCOUNT" \
     --role=roles/secretmanager.secretAccessor >/dev/null
 
-# Spot GPU capacity differs by zone and by hour, so every zone that offers this machine type is tried in turn
-# (United States first) until one has room. Only "no capacity" moves on to the next zone; any other error (quota,
+# Spot GPU capacity differs by zone and by hour, so every us-central1 zone that offers this machine type is tried
+# in turn until one has room. Only "no capacity" moves on to the next zone; any other error (quota,
 # billing, permissions) would be the same everywhere, so it is shown and the script stops.
-ALL_ZONES=$(gcloud compute machine-types list --filter="name=g4-standard-48" --format="value(zone)" | sort)
-ZONES="$(grep '^us-' <<<"$ALL_ZONES" || true) $(grep -v '^us-' <<<"$ALL_ZONES" || true)"
+ZONES=$(gcloud compute machine-types list --filter="name=g4-standard-48 AND zone~^us-central1-" --format="value(zone)" | sort)
 for ZONE in $ZONES; do
     echo "Trying $ZONE ..."
     if ERROR=$(gcloud compute instances create "$NAME" --zone="$ZONE" \
@@ -74,5 +73,5 @@ for ZONE in $ZONES; do
         exit 1
     fi
 done
-echo "No zone had a free machine right now. Try again in an hour."
+echo "No us-central1 zone had a free machine right now. Try again in an hour."
 exit 1

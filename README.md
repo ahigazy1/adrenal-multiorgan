@@ -25,7 +25,7 @@ git clone https://github.com/ahigazy1/adrenal-multiorgan
 bash adrenal-multiorgan/gcp/create_vm.sh
 ```
 
-This creates a Spot machine with one RTX PRO 6000 in the first zone that has room. A Hugging Face token must be in the project's Secret Manager under the name `HF_TOKEN`; if it is not there yet, the script asks for it once. The machine then works through everything by itself and switches itself off at the end:
+This creates a Spot machine with one RTX PRO 6000 in the first us-central1 zone that has room. A Hugging Face token must be in the project's Secret Manager under the name `HF_TOKEN`; if it is not there yet, the script asks for it once. The machine then works through everything by itself and switches itself off at the end:
 
 1. installs the pinned environment;
 2. `prepare.sh`: downloads the datasets, scans them, builds the dataset and split, uploads those tables to `https://huggingface.co/ahigazy1/adrenal-multiorgan-model/tree/main/dataset` (look at the exclusions and the split here while preprocessing runs), preprocesses; a few hours in total;
