@@ -73,7 +73,7 @@ def fetch_atlasnet_checkpoint(data):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--data', required=True, type=Path, help='the folder build_dataset.py wrote into')
-    parser.add_argument('--workers', type=int, default=min(32, os.cpu_count()), help='each worker needs about 4 GB of RAM')
+    parser.add_argument('--workers', type=int, default=min(16, os.cpu_count()), help='preprocessing workers; 16 is the safe default on g4-standard-48')
     args = parser.parse_args()
     data = args.data.resolve()
     raw, preprocessed = data / 'nnUNet_raw' / DATASET, data / 'nnUNet_preprocessed' / DATASET
