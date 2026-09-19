@@ -9,7 +9,7 @@
 set -euo pipefail
 DATA=$(mkdir -p "${1:-data}" && cd "${1:-data}" && pwd)
 MODEL_REPO=${ADRENAL_HF_REPO:-ahigazy1/adrenal-multiorgan-model}
-PREPROCESS_WORKERS=${ADRENAL_PREPROCESS_WORKERS:-16}
+PREPROCESS_WORKERS=${ADRENAL_PREPROCESS_WORKERS:-24}
 CPUS=$(nproc)
 export HF_XET_HIGH_PERFORMANCE=1
 mkdir -p results

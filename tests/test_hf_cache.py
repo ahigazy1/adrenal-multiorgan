@@ -29,7 +29,7 @@ class FakeHub:
         entries = {}
         for name, value in self.revisions[self.head].items():
             # Exercise both Git and LFS integrity metadata.
-            lfs = SimpleNamespace(sha256=hashlib.sha256(value).hexdigest()) if name.endswith(('.b2nd', '.pth')) else None
+            lfs = SimpleNamespace(sha256=hashlib.sha256(value).hexdigest()) if name.endswith(('.b2nd', '.pth', '.tar')) else None
             entries[name] = SimpleNamespace(size=len(value), lfs=lfs,
                 blob_id=hashlib.sha1(f'blob {len(value)}\0'.encode() + value).hexdigest())
         return self.head, entries
@@ -121,7 +121,7 @@ class CacheTests(unittest.TestCase):
         cache.publish_cache(self.hub, self.data, self.small_manifest())
         attributes = self.hub.revisions[self.hub.head]['.gitattributes'].decode()
         self.assertIn('*.zip filter=lfs', attributes)
-        self.assertIn('preprocessed/**/*.b2nd filter=lfs', attributes)
+        self.assertIn('preprocessed/**/*.tar filter=lfs', attributes)
         self.assertEqual(list(self.hub.commits[0][0]), ['.gitattributes'])
 
     def test_ensure_first_build_is_published_before_ready_marker(self):
@@ -180,16 +180,16 @@ class CacheTests(unittest.TestCase):
         with self.assertRaises(ConnectionError):
             cache.publish_cache(self.hub, self.data, value)
         self.assertNotIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
-        self.assertEqual(len(self.hub.commits[0][0]), 64)
+        self.assertTrue(next(iter(self.hub.commits[0][0])).endswith('.tar'))
         self.hub.fail_commit = None
         cache.publish_cache(self.hub, self.data, value)
-        self.assertEqual(len(self.hub.commits[1][0]), 6)
+        self.assertEqual(list(self.hub.commits[1][0]), [cache.complete_path('recipe')])
         self.assertIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
 
     def test_remote_payload_corruption_rejected(self):
         value = self.small_manifest()
         cache.publish_cache(self.hub, self.data, value)
-        name = next(iter(value['files']))
+        name = 'part-00000.tar'
         self.hub.revisions[self.hub.head][cache.cache_prefix(value) + '/' + name] = b'wrong'
         with self.assertRaisesRegex(RuntimeError, 'corrupt'):
             cache.publish_cache(self.hub, self.data, value)
@@ -201,16 +201,15 @@ class CacheTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'overwrite'):
             cache.publish_cache(self.hub, self.data, other)
 
-    def test_download_pinned_and_completed_files_reused(self):
+    def test_tar_download_pinned_and_files_verified(self):
         value = self.small_manifest()
         cache.publish_cache(self.hub, self.data, value)
         revision = self.hub.head
         target = self.root / 'restored'
-        cache.restore_files(self.hub, revision, cache.cache_prefix(value), value, target, self.root / 'stage')
+        value = json.loads(self.hub.revisions[revision][cache.complete_path('recipe')])
+        cache.restore_cache(self.hub, revision, value, target)
         cache.verify_local(target, value)
-        calls = len(self.hub.gets)
-        cache.restore_files(self.hub, revision, cache.cache_prefix(value), value, target, self.root / 'stage')
-        self.assertEqual(calls, len(self.hub.gets))
+        self.assertFalse(list((target / '.hf-downloads').rglob('*.tar')))
         self.assertTrue(all(r == revision for n, r, _ in self.hub.gets if n != '.gitattributes'))
 
     def test_missing_case_prevents_cache(self):
@@ -257,7 +256,7 @@ class CacheTests(unittest.TestCase):
         with patch.object(cache, 'recipe_id', return_value='recipe'), patch.object(cache.subprocess, 'run') as run:
             cache.ensure_prepared(fresh, self.root, self.hub)
             run.assert_not_called()
-        self.assertEqual(json.loads((fresh / '.prepared').read_text()), value)
+        self.assertEqual(json.loads((fresh / '.prepared').read_text())['content_id'], value['content_id'])
         cache.verify_local(fresh, value)
 
     def test_ensure_upload_retry_does_not_rebuild(self):

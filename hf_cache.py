@@ -16,6 +16,7 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import time
+import tarfile
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent
@@ -26,7 +27,7 @@ SNAPSHOT = '_hf_snapshot.json'
 ATLASNET_SHA256 = '73ff6cb8e09bbe0c7ad5097d10c281ef4a757c7740ef00b15ee683e907b3e37e'
 CACHE_REPO = 'ahigazy1/adrenal-multiorgan-cache'
 CACHE_ATTRIBUTES = ''.join(f'preprocessed/**/*.{extension} filter=lfs diff=lfs merge=lfs -text\n'
-                           for extension in ('b2nd', 'npy', 'nii.gz', 'pth'))
+                           for extension in ('tar',))
 log = logging.getLogger('hf_cache')
 
 
@@ -260,8 +261,48 @@ def restore_files(hub: Hub, revision: str, prefix: str, value: dict, target: Pat
                 log.info('Restored %d/%d files', index, len(jobs))
 
 
+def archive_groups(files: dict, limit: int = 10 * 2**30):
+    """Bound extra disk usage to one roughly 10 GiB uncompressed tar at a time."""
+    group, size = [], 0
+    for name, info in sorted(files.items()):
+        if group and size + info['size'] > limit:
+            yield group
+            group, size = [], 0
+        group.append(name)
+        size += info['size']
+    if group:
+        yield group
+
+
+def cache_archives(value: dict) -> dict:
+    archives = value.get('archives')
+    if not isinstance(archives, dict) or not archives:
+        raise RuntimeError('Cache has no tar archive manifest')
+    for name in archives:
+        if PurePosixPath(name).name != name or not name.endswith('.tar'):
+            raise RuntimeError(f'Unexpected archive name: {name}')
+        safe_path(Path('/artifact'), name)
+    return archives
+
+
+def restore_cache(hub: Hub, revision: str, value: dict, data: Path) -> None:
+    """Download and verify each tar before extracting; verify all files before training."""
+    for name, info in cache_archives(value).items():
+        archive = hub.get(f'{cache_prefix(value)}/{name}', revision, data / '.hf-downloads')
+        if not matches_local(archive, info):
+            raise RuntimeError(f'Download checksum failed: {name}')
+        with tarfile.open(archive, 'r') as tar:
+            for member in tar:
+                safe_path(data, member.name)
+                if not member.isfile() or member.name not in value['files']:
+                    raise RuntimeError(f'Unexpected tar member: {member.name}')
+                tar.extract(member, data, filter='data')
+        archive.unlink()
+    verify_local(data, value)
+
+
 def publish_cache(hub: Hub, data: Path, value: dict) -> None:
-    """Bounded atomic batches; only publish complete.json after remote verification."""
+    """Upload bounded tar archives; publish complete.json after remote verification."""
     revision, entries = hub.info()
     pointer = complete_path(value['recipe'])
     if pointer in entries:
@@ -269,7 +310,7 @@ def publish_cache(hub: Hub, data: Path, value: dict) -> None:
         check_manifest(existing, 'preprocessed', value['recipe'])
         if existing['content_id'] != value['content_id']:
             raise RuntimeError('A different complete cache exists for this recipe; refusing to overwrite it')
-        verify_remote(entries, cache_prefix(existing), existing)
+        verify_remote(entries, cache_prefix(existing), {'files': cache_archives(existing)})
         return
     # Explicitly route custom .b2nd arrays and other large binaries through LFS/Xet.
     # Preserve existing rules, including those for the source archive in this repository.
@@ -280,19 +321,24 @@ def publish_cache(hub: Hub, data: Path, value: dict) -> None:
         attributes = attributes.rstrip() + '\n' + '\n'.join(missing_rules) + '\n'
         revision = hub.commit({'.gitattributes': attributes.encode()}, 'Track preprocessing binaries with LFS', revision)
     prefix = cache_prefix(value)
-    pending = [name for name, info in value['files'].items()
-               if not matches_remote(entries.get(f'{prefix}/{name}'), info)]
-    log.info('Uploading cache: %d remaining of %d files', len(pending), len(value['files']))
-    for start in range(0, len(pending), 64):
-        batch = pending[start:start + 64]
-        revision = hub.commit({f'{prefix}/{name}': safe_path(data, name) for name in batch},
-                              f'Preprocessing cache: files {start + 1}-{start + len(batch)} of {len(pending)}', revision)
-        log.info('Cache upload: %d/%d remaining files committed', start + len(batch), len(pending))
+    archives = {}
+    archive = data / '.preprocessed-upload.tar'
+    for index, batch in enumerate(archive_groups(value['files'])):
+        name = f'part-{index:05d}.tar'
+        with tarfile.open(archive, 'w') as tar:
+            for member in batch:
+                tar.add(safe_path(data, member), arcname=member, recursive=False)
+        archives[name] = file_info(archive)
+        if not matches_remote(entries.get(f'{prefix}/{name}'), archives[name]):
+            log.info('Uploading %s (%.1f GiB)', name, archives[name]['size'] / 2**30)
+            revision = hub.commit({f'{prefix}/{name}': archive}, f'Preprocessing cache: {name}', revision)
+        archive.unlink()
     latest, entries = hub.info()
     if latest != revision:
         raise RuntimeError('Cache repository changed concurrently; rerun to reconcile safely')
-    verify_remote(entries, prefix, value)
-    hub.commit({pointer: encoded(value)}, 'Preprocessing cache complete and verified', revision)
+    verify_remote(entries, prefix, {'files': archives})
+    hub.commit({pointer: encoded(value | {'archives': archives})},
+               'Preprocessing tar cache complete and verified', revision)
     log.info('Published complete preprocessing cache: %s', value['content_id'])
 
 
@@ -315,9 +361,9 @@ def ensure_prepared(data: Path, root: Path = ROOT, hub=None) -> None:
     if pointer in entries:
         value = check_manifest(json.loads(hub.get(pointer, revision, data / '.hf-metadata').read_text()),
                                'preprocessed', recipe)
-        verify_remote(entries, cache_prefix(value), value)
+        verify_remote(entries, cache_prefix(value), {'files': cache_archives(value)})
         log.info('Complete Hugging Face cache found; skipping downloads of source datasets and preprocessing')
-        restore_files(hub, revision, cache_prefix(value), value, data, data / '.hf-downloads')
+        restore_cache(hub, revision, value, data)
         cache_files(data)
     else:
         log.info('No complete compatible cache; preparing locally with prepare.sh')

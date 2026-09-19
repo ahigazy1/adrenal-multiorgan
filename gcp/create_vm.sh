@@ -39,7 +39,7 @@ if [ -n "$ZONE" ]; then
     exit 0
 fi
 
-# The Hugging Face token (read access to ahigazy1/adrenal-multiorgan-cache, write access to
+# The Hugging Face token (write access to ahigazy1/adrenal-multiorgan-cache and
 # ahigazy1/adrenal-multiorgan-model) is kept in Secret Manager under the name HF_TOKEN, not on the disk and not in
 # this repository. If the secret already exists it is used as it is.
 if ! gcloud secrets describe HF_TOKEN >/dev/null 2>&1; then

@@ -8,7 +8,7 @@ Checkpoints remain in the private model repository `ahigazy1/adrenal-multiorgan-
 ## First successful preparation
 
 When there is no complete compatible cache, the VM runs `prepare.sh` as before.
-Preprocessing remains at 16 workers, with raw tqdm output redirected to a file.
+Preprocessing uses 24 workers, with raw tqdm output redirected to a file.
 After preparation succeeds, the cache validator requires all development cases,
 five nonoverlapping train/validation splits, foreground-sampling index files,
 validation ground truth, the held-out test images and labels, and the checksum-verified
@@ -19,8 +19,10 @@ training results or preprocessing logs as part of this cache. The prepared train
 arrays, case properties and sampling store are sufficient for training; native-space
 test images and labels are retained for the final evaluation.
 
-Each file is checksummed and uploaded directly from disk in bounded batches. There is
-no second 200 GB archive or full staging copy. Completed upload batches can be reused
+Files are checksummed and packed into roughly 10 GiB uncompressed tar archives. Only
+the tar archives and a completion manifest are uploaded, avoiding thousands of Hub files.
+Each archive is uploaded and deleted locally before building the next, so there is no
+second 200 GB archive or full staging copy. Completed archive uploads can be reused
 after an interruption on the same disk. A local `.preprocessed-local.json` records the
 completed build before uploading so retrying an upload does not rerun preprocessing.
 
@@ -33,7 +35,7 @@ verified restore. Training does not start with an incomplete cache.
 A fresh VM computes a recipe fingerprint from the preparation scripts, source-download
 pins, plans, `pixi.lock` and vendored nnU-Net Python sources. A complete cache for that
 exact recipe is downloaded from a single pinned Hugging Face commit. Every downloaded
-file is checksum-verified before it is accepted. Source downloads, cleaning, splitting,
+archive is checksum-verified before extraction, then every extracted file is verified. Source downloads, cleaning, splitting,
 resampling and sampling-index extraction are skipped on a cache hit.
 
 A partial remote upload is not a complete cache. If its VM and disk were deleted before
