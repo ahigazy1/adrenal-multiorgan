@@ -3,7 +3,7 @@
     python compare.py ours atlasnet labmate997 labmate998      # or a subset; finished scans are skipped
 
 For every model: download it from Hugging Face, segment the test scans with nnU-Net's own predictor
-(no mirroring, tile step 0.5), rename its labels to our nine organs, score with evaluate.py and upload
+(no mirroring, tile step 0.5, several patches per network call: batched_predictor.py), rename its labels to our nine organs, score with evaluate.py and upload
 predictions and tables to the model repository under comparison/<model>/.
 
 Resampling. Each model gets the CT resampled the way it was trained (its own plans). The network output of the
@@ -95,19 +95,20 @@ def predict(name, model, output, fold, checkpoint):
     import torch
     import nnunetv2.inference.predict_from_raw_data as nnunet
     from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+    from batched_predictor import BatchedPredictor
     # ponytail: the other groups' trainer classes are not in this repository. Only the network is needed and their
     # trainers build the standard one from plans.json, so an unknown trainer name falls back to nnUNetTrainer.
     find = nnunet.recursive_find_trainer_class_by_name
     nnunet.recursive_find_trainer_class_by_name = lambda trainer: find(trainer) or nnUNetTrainer
-    predictor = nnunet.nnUNetPredictor(tile_step_size=0.5, use_mirroring=False, perform_everything_on_device=True,
-                                       device=torch.device('cuda'))
+    predictor = BatchedPredictor(tile_step_size=0.5, use_mirroring=False, perform_everything_on_device=True,
+                                 device=torch.device('cuda'))
     predictor.initialize_from_trained_model_folder(str(model), use_folds=(fold,), checkpoint_name=checkpoint)
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
     mapping = label_mapping(model)
     record = {'model': name, 'checkpoint_sha256': sha256(model / f'fold_{fold}' / checkpoint), 'mirroring': False,
-              'tile_step_size': 0.5, 'resampling_fn_data': configuration['resampling_fn_data'],
+              'tile_step_size': 0.5, 'predictor': 'batched_predictor.py', 'resampling_fn_data': configuration['resampling_fn_data'],
               'resampling_fn_probabilities': configuration['resampling_fn_probabilities'],
               'label_mapping': {str(k): v for k, v in mapping.items()}}
     record_path = output / 'predict.json'

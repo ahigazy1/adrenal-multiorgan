@@ -14,7 +14,7 @@ The work is a short sequence of steps. Each step is one small script that logs w
 | 4 | `train.py`, `trainers/adrenal_multiorgan.py` | Training: one command, continues by itself | trainer checked on CPU; no epoch has run on a GPU yet |
 | 5 | `predict.py` | Segments the held-out test scans and scores them with `evaluate.py` | scoring tested; prediction not yet run |
 | 6 | `evaluate.py` | Dice, surface Dice (0.5, 0.8, 1.0 mm; `surface-distance` package) and volume error per scan and organ; reports for all organs, adrenals, aorta | tested on synthetic masks |
-| – | `compare.py`, `colab_compare.sh` | The same prediction and scoring for other models (AtlasNet, two TotalSegmentator-label models) on a Colab A100 | not yet run |
+| – | `compare.py`, `batched_predictor.py`, `colab_compare.sh` | The same prediction and scoring for other models (AtlasNet, two TotalSegmentator-label models) on a Colab A100 | not yet run |
 | all | `gcp/` | Creates or restarts the Spot machine, which runs everything above and switches itself off | creation, setup and preparation work; training and the automatic switch-off are not yet confirmed |
 
 `vendor/nnUNet` is nnU-Net 2.8.1 plus two SimpleITK resampling modules; see [vendor/README.md](vendor/README.md). `pixi.lock` pins the environment of the machine.
