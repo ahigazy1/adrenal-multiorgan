@@ -119,7 +119,7 @@ Decided: keep AtlasNet's [-1000, 629] HU. The window is wide because AtlasNet's 
 
 1. First epochs on Google Cloud: time per epoch and GPU memory decide whether 2000 epochs fit the 100-hour limit of one run (about 71 hours at 128 s per epoch).
 2. Confirm on the real machine: the background upload of the prepared data, a restore on a replacement machine, the automatic switch-off, and `predict.py`.
-3. Add surface Dice and signed/absolute volume error to the evaluation (`predict.py` currently reports nnU-Net's Dice and voxel counts, from which volumes follow).
+3. Run `compare.py` (our model, AtlasNet and two TotalSegmentator-label models on the test scans; `evaluate.py` reports Dice, surface Dice and volume error).
 
 ## Lessons from the first runs
 

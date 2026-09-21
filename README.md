@@ -12,7 +12,9 @@ The work is a short sequence of steps. Each step is one small script that logs w
 | 1-3 | `prepare.sh` | Downloads the four datasets from Hugging Face and runs steps 1-3; uploads the tables of steps 1-2 before preprocessing starts | ran to completion on Google Cloud |
 | cache | `hf_cache.py` | Restores a verified copy of the prepared data on a new machine, or uploads one in the background while training runs; atomic checkpoint snapshots | 27 offline tests pass; no real upload or restore has completed yet |
 | 4 | `train.py`, `trainers/adrenal_multiorgan.py` | Training: one command, continues by itself | trainer checked on CPU; no epoch has run on a GPU yet |
-| 5 | `predict.py` | Segments the held-out test scans and scores them with nnU-Net's evaluator | evaluator half tested; prediction not yet run |
+| 5 | `predict.py` | Segments the held-out test scans and scores them with `evaluate.py` | scoring tested; prediction not yet run |
+| 6 | `evaluate.py` | Dice, surface Dice (0.5, 0.8, 1.0 mm; `surface-distance` package) and volume error per scan and organ; reports for all organs, adrenals, aorta | tested on synthetic masks |
+| – | `compare.py`, `colab_compare.sh` | The same prediction and scoring for other models (AtlasNet, two TotalSegmentator-label models) on a Colab A100 | not yet run |
 | all | `gcp/` | Creates or restarts the Spot machine, which runs everything above and switches itself off | creation, setup and preparation work; training and the automatic switch-off are not yet confirmed |
 
 `vendor/nnUNet` is nnU-Net 2.8.1 plus two SimpleITK resampling modules; see [vendor/README.md](vendor/README.md). `pixi.lock` pins the environment of the machine.
@@ -66,7 +68,7 @@ pixi run python predict.py
 
 `train.py` starts, continues after an interruption, or restores a verified checkpoint snapshot from Hugging Face. It checks the trainer, plans, split and cached data identity before resuming. All settings that differ from stock nnU-Net are listed at the top of `trainers/adrenal_multiorgan.py`; `python check_trainer.py atlasnet_plans.json` confirms them without a GPU or data (`atlasnet_plans.json` is the plans file shipped with the AtlasNet weights).
 
-`predict.py` uses nnU-Net's predictor without mirroring (`--checkpoint best` for the best instead of the final checkpoint) and nnU-Net's evaluator: Dice and voxel counts per scan and label in `data/predictions/<checkpoint>/summary.json`.
+`predict.py` uses nnU-Net's predictor without mirroring (`--checkpoint best` for the best instead of the final checkpoint) and `evaluate.py`: Dice, surface Dice at 0.5, 0.8 and 1.0 mm and volume error per scan and organ in `data/predictions/<checkpoint>/evaluation/`.
 
 To try steps 1 and 2 on a laptop (`pip install -r requirements.txt`):
 
