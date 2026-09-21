@@ -3,7 +3,8 @@
 # in ~/.cache/huggingface/token or $HF_TOKEN. The run is detached: results are uploaded to Hugging Face by compare.py.
 #     bash colab_compare.sh                 start
 #     bash colab_compare.sh log             show progress
-#     colab stop -s adrenal-compare         release the GPU when it has finished
+# compare.py releases the GPU itself on every exit path and uploads its log to comparison/compare.log first.
+#     colab stop -s adrenal-compare         only needed to stop a run early
 set -euo pipefail
 cd "$(dirname "$0")"
 SESSION=adrenal-compare
@@ -20,7 +21,7 @@ run = lambda command: subprocess.run(command, shell=True, check=True, cwd='/cont
 run('test -d adrenal-multiorgan || git clone -q https://github.com/ahigazy1/adrenal-multiorgan; git -C adrenal-multiorgan pull -q')
 run('cp compare.py evaluate.py adrenal-multiorgan/')
 run('pip install -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 polars')  # Colab's own torch is kept
-environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': '4'}  # 4 torch threads per export worker; train.py turns torch.compile on
+environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': '4', 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
 subprocess.Popen('nohup python compare.py ours atlasnet labmate997 labmate998 > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
 print('started; follow it with: bash colab_compare.sh log')

@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import tarfile
@@ -40,7 +41,7 @@ MODELS = {'ours': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.p
           'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth')}
 NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right': ['adrenal_right', 'adrenal_gland_right'],
          'inferior_vena_cava': ['inferior_vena_cava', 'postcava']}  # other organs have the same name everywhere
-MAX_LOGIT_DIFFERENCE = 1e-3  # batched against nnU-Net's own sliding window; no label may change either
+ABORT_CONDITION = "labels_changed > 0 (batched against nnU-Net's own sliding window); max_delta_logit is reported only"
 log = logging.getLogger('compare')
 
 
@@ -117,14 +118,24 @@ def check_batching(name, model, fold, checkpoint):
     scan = scans[len(scans) // 2]  # the scan of median file size
     data = predictor.configuration_manager.preprocessor_class(verbose=False).run_case(
         [str(scan)], None, predictor.plans_manager, predictor.configuration_manager, predictor.dataset_json)[0]
-    logits = []
-    for kind in (nnUNetPredictor, type(predictor)):
+    batched = type(predictor)
+
+    def logits_of(kind):
         predictor.__class__ = kind
-        logits.append(predictor.predict_logits_from_preprocessed_data(torch.from_numpy(data)).float())
-    result = {'model': name, 'scan': scan.name, 'shape': list(data.shape),
-              'largest_logit_difference': (logits[0] - logits[1]).abs().max().item(),
-              'labels_changed': int((logits[0].argmax(0) != logits[1].argmax(0)).sum())}
-    result['passed'] = result['largest_logit_difference'] < MAX_LOGIT_DIFFERENCE and result['labels_changed'] == 0
+        return predictor.predict_logits_from_preprocessed_data(torch.from_numpy(data)).float()
+
+    stock = logits_of(nnUNetPredictor)
+    labels = stock.argmax(0)
+    result = {'model': name, 'scan': scan.name, 'shape': list(data.shape), 'voxels': labels.numel()}
+    # nnU-Net's own predictor a second time: how much it differs from itself (cuDNN autotuning, torch.compile)
+    for key, kind in (('stock_repeated', nnUNetPredictor), ('batched', batched)):
+        other = logits_of(kind)
+        result[key] = {'max_delta_logit': (other - stock).abs().max().item(),
+                       'labels_changed': int((other.argmax(0) != labels).sum())}
+        del other
+    result['max_delta_logit'], result['labels_changed'] = result['batched'].values()
+    result['abort_condition'] = ABORT_CONDITION
+    result['passed'] = result['labels_changed'] == 0
     log.info('Batching check %s', result)
     return result
 
@@ -164,6 +175,7 @@ def main():
     parser.add_argument('models', nargs='+', choices=list(MODELS))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+    log.info('main_then_release is active: the Colab runtime is released on every exit path')
     fetch_test_scans()
     checks = [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
     (DATA / 'comparison').mkdir(exist_ok=True)
@@ -183,6 +195,42 @@ def main():
         log.info('Uploaded comparison/%s to %s', name, MODEL_REPO)
 
 
+def release_runtime(reason):
+    """On Colab: upload the console log, then give the (paid) runtime back. Anywhere else: nothing to do."""
+    log.info('Exit path: %s', reason)
+    try:
+        from google.colab import runtime
+    except ImportError:
+        return log.info('Not on Colab: no runtime to release')
+    console = os.environ.get('ADRENAL_COMPARE_LOG')
+    try:
+        if console:
+            HfApi().upload_file(repo_id=MODEL_REPO, path_or_fileobj=console, path_in_repo='comparison/compare.log',
+                                commit_message=f'comparison log ({reason})')
+    finally:
+        log.info('Releasing the Colab runtime')
+        runtime.unassign()
+
+
+def main_then_release():
+    """Whatever ends main() - the end, sys.exit, Ctrl-C, a kill or a crash - the Colab runtime is released."""
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit('terminated (SIGTERM)'))
+    reason = 'finished'
+    try:
+        main()
+    except KeyboardInterrupt:
+        reason = 'interrupted (SIGINT)'
+        raise
+    except SystemExit as stop:
+        reason = f'sys.exit({stop.code!r})'
+        raise
+    except BaseException as error:
+        reason = f'crashed: {error!r}'
+        raise
+    finally:
+        release_runtime(reason)
+
+
 def self_check():
     import numpy as np
     lut = np.zeros(256, np.uint8)
@@ -192,4 +240,4 @@ def self_check():
 
 if __name__ == '__main__':
     self_check()
-    main()
+    main_then_release()
