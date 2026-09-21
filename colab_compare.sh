@@ -20,7 +20,7 @@ run = lambda command: subprocess.run(command, shell=True, check=True, cwd='/cont
 run('test -d adrenal-multiorgan || git clone -q https://github.com/ahigazy1/adrenal-multiorgan')
 run('cp compare.py evaluate.py adrenal-multiorgan/')
 run('pip install -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 polars')  # Colab's own torch is kept
-environment = os.environ | {'SITK_THREADS': '4', 'HF_HUB_DISABLE_PROGRESS_BARS': '1'}  # train.py turns torch.compile on
+environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': '4'}  # 4 torch threads per export worker; train.py turns torch.compile on
 subprocess.Popen('nohup python compare.py ours atlasnet labmate997 labmate998 > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
 print('started; follow it with: bash colab_compare.sh log')

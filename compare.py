@@ -8,7 +8,7 @@ predictions and tables to the model repository under comparison/<model>/.
 
 Resampling. Each model gets the CT resampled the way it was trained (its own plans). The network output of the
 models whose plans use nnU-Net's default resampler is resampled with the SimpleITK function instead: same result
-to float precision (PLAN.md), but multithreaded. AtlasNet keeps its own GPU resampler; ours is SimpleITK already.
+to float precision (PLAN.md), but multithreaded. AtlasNet keeps its own torch resampler; ours is SimpleITK already.
 
 The other models were trained on TotalSegmentator scans with other splits, so some of our TotalSegmentator test
 scans were training scans for them: read their numbers per source (evaluation/*_by_source.csv).
@@ -116,9 +116,13 @@ def predict(name, model, output, fold, checkpoint):
     native = output / 'native_labels'
     native.mkdir(parents=True, exist_ok=True)
     record_path.write_text(json.dumps(record, indent=2))
-    workers = max(3, os.cpu_count() // 4)  # each worker resamples with SITK_THREADS threads; export memory grows with classes
+    # Export workers hold the full-size network output of a scan (classes x voxels, float32, twice), so models with many
+    # classes get fewer of them. The workers are new processes and read SITK_THREADS when they start.
+    cpus = os.cpu_count()
+    exporters = max(2, cpus // (4 if len(predictor.dataset_json['labels']) <= 40 else 6))
+    os.environ['SITK_THREADS'] = str(cpus // exporters)
     predictor.predict_from_files(str(RAW / 'imagesTs'), str(native), save_probabilities=False, overwrite=False,
-                                 num_processes_preprocessing=workers, num_processes_segmentation_export=workers)
+                                 num_processes_preprocessing=max(3, cpus // 4), num_processes_segmentation_export=exporters)
     lut = np.zeros(256, np.uint8)
     lut[list(mapping)] = list(mapping.values())
     for path in sorted(native.glob('*.nii.gz')):
