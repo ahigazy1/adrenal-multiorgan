@@ -55,7 +55,7 @@ def fetch_test_scans():
         if all((DATA / name).exists() for name in wanted):
             break
         log.info('Downloading %s', part)
-        path = hf_hub_download(CACHE_REPO, f'{Path(complete).parent.as_posix()}/{part}', repo_type='dataset')
+        path = hf_hub_download(CACHE_REPO, f"{Path(complete).parent.as_posix()}/{record['content_id']}/{part}", repo_type='dataset')
         with tarfile.open(path) as tar:
             tar.extractall(DATA, members=[m for m in tar if m.name in wanted], filter='data')
     for name in wanted:
