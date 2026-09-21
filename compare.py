@@ -40,6 +40,7 @@ MODELS = {'ours': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.p
           'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth')}
 NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right': ['adrenal_right', 'adrenal_gland_right'],
          'inferior_vena_cava': ['inferior_vena_cava', 'postcava']}  # other organs have the same name everywhere
+MAX_LOGIT_DIFFERENCE = 1e-3  # batched against nnU-Net's own sliding window; no label may change either
 log = logging.getLogger('compare')
 
 
@@ -89,9 +90,7 @@ def label_mapping(model):
     return mapping
 
 
-def predict(name, model, output, fold, checkpoint):
-    import nibabel as nib
-    import numpy as np
+def load_predictor(model, fold, checkpoint):
     import torch
     import nnunetv2.inference.predict_from_raw_data as nnunet
     from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
@@ -106,6 +105,35 @@ def predict(name, model, output, fold, checkpoint):
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
+    return predictor
+
+
+def check_batching(name, model, fold, checkpoint):
+    """One scan through nnU-Net's own sliding window and through the batched one: the network outputs must agree."""
+    import torch
+    from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+    predictor = load_predictor(model, fold, checkpoint)
+    scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'), key=lambda path: path.stat().st_size)
+    scan = scans[len(scans) // 2]  # the scan of median file size
+    data = predictor.configuration_manager.preprocessor_class(verbose=False).run_case(
+        [str(scan)], None, predictor.plans_manager, predictor.configuration_manager, predictor.dataset_json)[0]
+    logits = []
+    for kind in (nnUNetPredictor, type(predictor)):
+        predictor.__class__ = kind
+        logits.append(predictor.predict_logits_from_preprocessed_data(torch.from_numpy(data)).float())
+    result = {'model': name, 'scan': scan.name, 'shape': list(data.shape),
+              'largest_logit_difference': (logits[0] - logits[1]).abs().max().item(),
+              'labels_changed': int((logits[0].argmax(0) != logits[1].argmax(0)).sum())}
+    result['passed'] = result['largest_logit_difference'] < MAX_LOGIT_DIFFERENCE and result['labels_changed'] == 0
+    log.info('Batching check %s', result)
+    return result
+
+
+def predict(name, model, output, fold, checkpoint):
+    import nibabel as nib
+    import numpy as np
+    predictor = load_predictor(model, fold, checkpoint)
+    configuration = predictor.configuration_manager.configuration
     mapping = label_mapping(model)
     record = {'model': name, 'checkpoint_sha256': sha256(model / f'fold_{fold}' / checkpoint), 'mirroring': False,
               'tile_step_size': 0.5, 'predictor': 'batched_predictor.py', 'resampling_fn_data': configuration['resampling_fn_data'],
@@ -137,6 +165,13 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     fetch_test_scans()
+    checks = [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
+    (DATA / 'comparison').mkdir(exist_ok=True)
+    (DATA / 'comparison/batching_check.json').write_text(json.dumps(checks, indent=2))
+    HfApi().upload_file(repo_id=MODEL_REPO, path_or_fileobj=DATA / 'comparison/batching_check.json',
+                        path_in_repo='comparison/batching_check.json', commit_message='batched sliding window check')
+    if not all(check['passed'] for check in checks):
+        raise SystemExit("The batched sliding window disagrees with nnU-Net's own: nothing was predicted")
     for name in args.models:
         output = DATA / 'comparison' / name
         log.info('=== %s', name)
