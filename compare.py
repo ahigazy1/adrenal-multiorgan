@@ -42,7 +42,11 @@ D998 = 'Dataset998_TotalSeg66classes/nnUNetTrainer_2000epochs_NoMirroring__nnUNe
 MODELS = {'ours': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.pth'),
           'labmate997': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth'),
           'labmate998': ('ahigazy1/AdrenalSeg-Sources', 'dataset', D998, 0, 'checkpoint_final.pth'),
-          'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth')}
+          'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth'),
+          'labmate997-reoriented': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth')}
+# labmate997's dataset.json names no image reader, so nnU-Net's SimpleITK reader was used and the AMOS and BTCV scans
+# (not stored RAS) came out mirrored left/right. The reorienting reader every other model uses fixes that.
+READER = {'labmate997-reoriented': 'NibabelIOWithReorient'}
 NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right': ['adrenal_right', 'adrenal_gland_right'],
          'inferior_vena_cava': ['inferior_vena_cava', 'postcava']}  # other organs have the same name everywhere
 MAX_CHANGED_FRACTION = 1e-4  # accepted: batching changed 1 to 9 voxels per million on the first check; nnU-Net itself repeats exactly
@@ -97,7 +101,7 @@ def label_mapping(model):
     return mapping
 
 
-def load_predictor(model, fold, checkpoint):
+def load_predictor(name, model, fold, checkpoint):
     import torch
     import nnunetv2.inference.predict_from_raw_data as nnunet
     from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
@@ -109,6 +113,8 @@ def load_predictor(model, fold, checkpoint):
     predictor = BatchedPredictor(tile_step_size=0.5, use_mirroring=False, perform_everything_on_device=True,
                                  device=torch.device('cuda'))
     predictor.initialize_from_trained_model_folder(str(model), use_folds=(fold,), checkpoint_name=checkpoint)
+    if name in READER:
+        predictor.dataset_json['overwrite_image_reader_writer'] = READER[name]
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
@@ -119,7 +125,7 @@ def check_batching(name, model, fold, checkpoint):
     """One scan through nnU-Net's own sliding window and through the batched one: the network outputs must agree."""
     import torch
     from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-    predictor = load_predictor(model, fold, checkpoint)
+    predictor = load_predictor(name, model, fold, checkpoint)
     scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'), key=lambda path: path.stat().st_size)
     scan = scans[len(scans) // 2]  # the scan of median file size
     data = predictor.configuration_manager.preprocessor_class(verbose=False).run_case(
@@ -150,11 +156,12 @@ def check_batching(name, model, fold, checkpoint):
 def predict(name, model, output, fold, checkpoint):
     import nibabel as nib
     import numpy as np
-    predictor = load_predictor(model, fold, checkpoint)
+    predictor = load_predictor(name, model, fold, checkpoint)
     configuration = predictor.configuration_manager.configuration
     mapping = label_mapping(model)
     record = {'model': name, 'checkpoint_sha256': sha256(model / f'fold_{fold}' / checkpoint), 'mirroring': False,
-              'tile_step_size': 0.5, 'predictor': 'batched_predictor.py', 'resampling_fn_data': configuration['resampling_fn_data'],
+              'tile_step_size': 0.5, 'predictor': 'batched_predictor.py',
+              'image_reader': predictor.dataset_json.get('overwrite_image_reader_writer', 'SimpleITKIO'), 'resampling_fn_data': configuration['resampling_fn_data'],
               'resampling_fn_probabilities': configuration['resampling_fn_probabilities'],
               'label_mapping': {str(k): v for k, v in mapping.items()}}
     record_path = output / 'predict.json'

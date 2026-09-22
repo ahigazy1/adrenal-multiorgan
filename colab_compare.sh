@@ -36,11 +36,11 @@ run('test -d adrenal-multiorgan || git clone -q https://github.com/ahigazy1/adre
 run('cp compare.py evaluate.py adrenal-multiorgan/')
 run('pip install -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 polars')  # Colab's own torch is kept
 environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': str(os.cpu_count()), 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
-subprocess.Popen('nohup python compare.py ours atlasnet labmate997 labmate998 > /content/compare.log 2>&1', shell=True,
+subprocess.Popen('nohup python compare.py ' + os.environ['MODELS'] + ' > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
 print('started; follow it with: bash colab_compare.sh log')
 EOF
-colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" -f /tmp/adrenal_start.py
+colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" -f /tmp/adrenal_start.py
 # Colab reclaims a runtime nobody talks to. Refresh its idle timer every 5 minutes for as long as it exists.
 cat > /tmp/adrenal_keepalive.py <<'PY'
 import time
