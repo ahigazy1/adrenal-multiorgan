@@ -11,6 +11,13 @@ SESSION=adrenal-compare
 if [ "${1:-}" = keepalive ]; then
     exec ~/.local/share/uv/tools/google-colab-cli/bin/python /tmp/adrenal_keepalive.py
 fi
+if [ "${1:-}" = poll ]; then  # Colab removed runtimes that nobody talked to for ~20 min; a log read every minute is talking
+    while colab sessions 2>/dev/null | grep -q Hardware; do
+        bash "$0" log > /tmp/adrenal_poll.log 2>&1 || true
+        sleep 60
+    done
+    exit 0
+fi
 if [ "${1:-}" = log ]; then
     cat > /tmp/adrenal_log.py <<'PY'
 import re
@@ -48,3 +55,4 @@ while True:
 PY
 nohup setsid ~/.local/share/uv/tools/google-colab-cli/bin/python /tmp/adrenal_keepalive.py > /tmp/adrenal_keepalive.log 2>&1 &
 echo "keep-alive running (pid $!). It dies with WSL: after a reboot run  bash colab_compare.sh keepalive"
+echo "now keep it talking from a shell that stays open:  bash colab_compare.sh poll"
