@@ -21,10 +21,12 @@ import signal
 import subprocess
 import sys
 import tarfile
+import threading
+import time
 import zipfile
 from pathlib import Path
 
-from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 
 from evaluate import LABELS
 from hf_cache import CACHE_REPO
@@ -43,6 +45,7 @@ NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right'
          'inferior_vena_cava': ['inferior_vena_cava', 'postcava']}  # other organs have the same name everywhere
 MAX_CHANGED_FRACTION = 1e-4  # accepted: batching changed 1 to 9 voxels per million on the first check; nnU-Net itself repeats exactly
 ABORT_CONDITION = f"labels_changed / voxels > {MAX_CHANGED_FRACTION} (batched against nnU-Net's own sliding window)"
+CHUNK = 20  # scans predicted between two uploads
 log = logging.getLogger('compare')
 
 
@@ -158,13 +161,25 @@ def predict(name, model, output, fold, checkpoint):
     native = output / 'native_labels'
     native.mkdir(parents=True, exist_ok=True)
     record_path.write_text(json.dumps(record, indent=2))
+    # scans predicted by an earlier, lost machine: fetch them so they are not predicted again
+    snapshot_download(MODEL_REPO, allow_patterns=[f'comparison/{name}/native_labels/*'], local_dir=DATA)
+    api = HfApi()
     # Export workers hold the full-size network output of a scan (classes x voxels, float32, twice), so models with many
     # classes get fewer of them. The workers are new processes and read SITK_THREADS when they start.
     cpus = os.cpu_count()
     exporters = max(2, cpus // (4 if len(predictor.dataset_json['labels']) <= 40 else 6))
     os.environ['SITK_THREADS'] = str(cpus // exporters)
-    predictor.predict_from_files(str(RAW / 'imagesTs'), str(native), save_probabilities=False, overwrite=False,
-                                 num_processes_preprocessing=max(3, cpus // 4), num_processes_segmentation_export=exporters)
+    scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'))
+    for start in range(0, len(scans), CHUNK):  # after every chunk the predictions are safe on Hugging Face
+        chunk = [s for s in scans[start:start + CHUNK] if not (native / s.name.replace('_0000', '')).exists()]
+        if not chunk:
+            continue
+        predictor.predict_from_files([[str(s)] for s in chunk], [str(native / s.name[:-12]) for s in chunk],
+                                     save_probabilities=False, overwrite=False,
+                                     num_processes_preprocessing=max(3, cpus // 4), num_processes_segmentation_export=exporters)
+        api.upload_folder(repo_id=MODEL_REPO, folder_path=native, path_in_repo=f'comparison/{name}/native_labels',
+                          commit_message=f'{name}: {min(start + CHUNK, len(scans))} of {len(scans)} scans')
+        log.info('%s: %d of %d scans predicted and uploaded', name, min(start + CHUNK, len(scans)), len(scans))
     lut = np.zeros(256, np.uint8)
     lut[list(mapping)] = list(mapping.values())
     for path in sorted(native.glob('*.nii.gz')):
@@ -178,6 +193,17 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     log.info('main_then_release is active: the Colab runtime is released on every exit path')
+    console = os.environ.get('ADRENAL_COMPARE_LOG')
+    if console:  # the log reaches Hugging Face every 10 minutes, so a machine that vanishes still leaves its trace
+        def ship_log():
+            while True:
+                time.sleep(600)
+                try:
+                    HfApi().upload_file(repo_id=MODEL_REPO, path_or_fileobj=console, path_in_repo='comparison/compare.log',
+                                        commit_message='comparison log (running)')
+                except Exception as error:
+                    log.warning('log upload failed: %r', error)
+        threading.Thread(target=ship_log, daemon=True).start()
     fetch_test_scans()
     checks = [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
     (DATA / 'comparison').mkdir(exist_ok=True)

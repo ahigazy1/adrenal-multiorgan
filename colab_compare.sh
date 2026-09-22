@@ -8,8 +8,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 SESSION=adrenal-compare
+if [ "${1:-}" = keepalive ]; then
+    exec ~/.local/share/uv/tools/google-colab-cli/bin/python /tmp/adrenal_keepalive.py
+fi
 if [ "${1:-}" = log ]; then
-    echo "print(open('/content/compare.log').read()[-6000:])" > /tmp/adrenal_log.py
+    cat > /tmp/adrenal_log.py <<'PY'
+import re
+lines = open('/content/compare.log', errors='replace').read().replace('\r', '\n').splitlines()
+print('\n'.join(l[:300] for l in lines if re.search(r'scans predicted|Batching check|=== |Exit path|Traceback|Error|Killed|died|verified|Uploaded', l) and 'HTTP' not in l)[-5000:])
+PY
     exec colab exec -s $SESSION --timeout 60 -f /tmp/adrenal_log.py
 fi
 TOKEN=${HF_TOKEN:-$(cat ~/.cache/huggingface/token)}
@@ -27,3 +34,17 @@ subprocess.Popen('nohup python compare.py ours atlasnet labmate997 labmate998 > 
 print('started; follow it with: bash colab_compare.sh log')
 EOF
 colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" -f /tmp/adrenal_start.py
+# Colab reclaims a runtime nobody talks to. Refresh its idle timer every 5 minutes for as long as it exists.
+cat > /tmp/adrenal_keepalive.py <<'PY'
+import time
+from colab_cli.common import state
+while True:
+    _, assignments = state.sync_sessions()
+    if not assignments:
+        break
+    for a in assignments:
+        state.client.keep_alive_assignment(a.endpoint)
+    time.sleep(300)
+PY
+nohup setsid ~/.local/share/uv/tools/google-colab-cli/bin/python /tmp/adrenal_keepalive.py > /tmp/adrenal_keepalive.log 2>&1 &
+echo "keep-alive running (pid $!). It dies with WSL: after a reboot run  bash colab_compare.sh keepalive"
