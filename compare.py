@@ -17,6 +17,8 @@ import argparse
 import json
 import logging
 import os
+import psutil
+import resource
 import signal
 import subprocess
 import sys
@@ -166,9 +168,11 @@ def predict(name, model, output, fold, checkpoint):
     api = HfApi()
     # Export workers hold the full-size network output of a scan (classes x voxels, float32, twice), so models with many
     # classes get fewer of them. The workers are new processes and read SITK_THREADS when they start.
+    # A whole-body scan at 1 mm is ~250 M voxels: 10 GB per class-volume copy for our model, 65 GB for the 66-class ones.
+    # A machine that runs out of memory simply vanishes (twice so far), so one export at a time and the threads go to it.
     cpus = os.cpu_count()
-    exporters = max(2, cpus // (4 if len(predictor.dataset_json['labels']) <= 40 else 6))
-    os.environ['SITK_THREADS'] = str(cpus // exporters)
+    exporters = 1
+    os.environ['SITK_THREADS'] = str(cpus)
     scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'))
     for start in range(0, len(scans), CHUNK):  # after every chunk the predictions are safe on Hugging Face
         chunk = [s for s in scans[start:start + CHUNK] if not (native / s.name.replace('_0000', '')).exists()]
@@ -176,10 +180,13 @@ def predict(name, model, output, fold, checkpoint):
             continue
         predictor.predict_from_files([[str(s)] for s in chunk], [str(native / s.name[:-12]) for s in chunk],
                                      save_probabilities=False, overwrite=False,
-                                     num_processes_preprocessing=max(3, cpus // 4), num_processes_segmentation_export=exporters)
+                                     num_processes_preprocessing=2, num_processes_segmentation_export=exporters)
         api.upload_folder(repo_id=MODEL_REPO, folder_path=native, path_in_repo=f'comparison/{name}/native_labels',
                           commit_message=f'{name}: {min(start + CHUNK, len(scans))} of {len(scans)} scans')
-        log.info('%s: %d of %d scans predicted and uploaded', name, min(start + CHUNK, len(scans)), len(scans))
+        memory = psutil.virtual_memory()
+        log.info('%s: %d of %d scans predicted and uploaded; memory in use %.0f of %.0f GB (peak of this process %.0f GB)',
+                 name, min(start + CHUNK, len(scans)), len(scans), memory.used / 1e9, memory.total / 1e9,
+                 resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6)
     lut = np.zeros(256, np.uint8)
     lut[list(mapping)] = list(mapping.values())
     for path in sorted(native.glob('*.nii.gz')):
