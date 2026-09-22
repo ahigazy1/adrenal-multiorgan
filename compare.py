@@ -204,13 +204,21 @@ def main():
     if console:  # the log reaches Hugging Face every 10 minutes, so a machine that vanishes still leaves its trace
         def ship_log():
             while True:
-                time.sleep(600)
+                time.sleep(90)
                 try:
                     HfApi().upload_file(repo_id=MODEL_REPO, path_or_fileobj=console, path_in_repo='comparison/compare.log',
                                         commit_message='comparison log (running)')
                 except Exception as error:
                     log.warning('log upload failed: %r', error)
         threading.Thread(target=ship_log, daemon=True).start()
+
+        def sample_memory():  # machines have vanished without a trace: leave one every 15 s
+            while True:
+                memory, disk = psutil.virtual_memory(), psutil.disk_usage('/')
+                log.info('memory %.1f of %.1f GB used, %.1f GB available; disk %.0f GB free',
+                         memory.used / 1e9, memory.total / 1e9, memory.available / 1e9, disk.free / 1e9)
+                time.sleep(15)
+        threading.Thread(target=sample_memory, daemon=True).start()
     fetch_test_scans()
     checks = [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
     (DATA / 'comparison').mkdir(exist_ok=True)
