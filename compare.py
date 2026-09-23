@@ -44,10 +44,12 @@ MODELS = {'ours': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.p
           'labmate997': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth'),
           'labmate998': ('ahigazy1/AdrenalSeg-Sources', 'dataset', D998, 0, 'checkpoint_final.pth'),
           'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth'),
-          'labmate997-reoriented': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth')}
-# labmate997's dataset.json names no image reader, so nnU-Net's SimpleITK reader was used and the AMOS and BTCV scans
-# (not stored RAS) came out mirrored left/right. The reorienting reader every other model uses fixes that.
-READER = {'labmate997-reoriented': 'NibabelIOWithReorient'}
+          'labmate997-reoriented': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth'),
+          'labmate997-fixed': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth')}
+# labmate997's plans.json names the reader NibabelIO, which does not reorient: the AMOS and BTCV scans (not stored RAS)
+# reach the network in another orientation. The reorienting reader every other model uses fixes that. nnU-Net takes
+# the reader from the plans, so it is set there ('labmate997-reoriented' set it in dataset.json, which is ignored).
+READER = {'labmate997-fixed': 'NibabelIOWithReorient'}
 NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right': ['adrenal_right', 'adrenal_gland_right'],
          'inferior_vena_cava': ['inferior_vena_cava', 'postcava']}  # other organs have the same name everywhere
 MAX_CHANGED_FRACTION = 1e-4  # accepted: batching changed 1 to 9 voxels per million on the first check; nnU-Net itself repeats exactly
@@ -115,7 +117,7 @@ def load_predictor(name, model, fold, checkpoint):
                                  device=torch.device('cuda'))
     predictor.initialize_from_trained_model_folder(str(model), use_folds=(fold,), checkpoint_name=checkpoint)
     if name in READER:
-        predictor.dataset_json['overwrite_image_reader_writer'] = READER[name]
+        predictor.plans_manager.plans['image_reader_writer'] = READER[name]
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
@@ -162,7 +164,7 @@ def predict(name, model, output, fold, checkpoint):
     mapping = label_mapping(model)
     record = {'model': name, 'checkpoint_sha256': sha256(model / f'fold_{fold}' / checkpoint), 'mirroring': False,
               'tile_step_size': 0.5, 'predictor': 'batched_predictor.py',
-              'image_reader': predictor.dataset_json.get('overwrite_image_reader_writer', 'SimpleITKIO'), 'resampling_fn_data': configuration['resampling_fn_data'],
+              'image_reader': predictor.plans_manager.plans['image_reader_writer'], 'resampling_fn_data': configuration['resampling_fn_data'],
               'resampling_fn_probabilities': configuration['resampling_fn_probabilities'],
               'label_mapping': {str(k): v for k, v in mapping.items()}}
     record_path = output / 'predict.json'
