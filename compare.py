@@ -40,6 +40,7 @@ RAW = DATA / 'nnUNet_raw' / DATASET
 D998 = 'Dataset998_TotalSeg66classes/nnUNetTrainer_2000epochs_NoMirroring__nnUNetResEncLPlans_16GB__3d_fullres_bs8'
 # model -> Hugging Face repo, repo type, folder in the repo, fold, checkpoint
 MODELS = {'ours': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.pth'),
+          'ours-epoch1957': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.pth'),  # best of the finished run; 'ours' holds epoch 1300
           'labmate997': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth'),
           'labmate998': ('ahigazy1/AdrenalSeg-Sources', 'dataset', D998, 0, 'checkpoint_final.pth'),
           'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth'),
