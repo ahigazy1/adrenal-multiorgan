@@ -3,7 +3,7 @@
 # work is finished. Checkpoints, logs and predictions that were uploaded to Hugging Face are not affected;
 # anything that exists only on the machine's disk is lost for good.
 set -euo pipefail
-NAME=adrenal-train
+NAME=${NAME:-adrenal-train}
 ZONE=$(gcloud compute instances list --filter="name=$NAME" --format="value(zone.basename())")
 [ -n "$ZONE" ] || { echo "There is no machine called $NAME in this project. Nothing to delete."; exit 0; }
 read -r -p "Delete $NAME in $ZONE and its disk for good? Type yes: " ANSWER
