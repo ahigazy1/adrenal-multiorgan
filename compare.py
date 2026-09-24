@@ -210,6 +210,11 @@ def load_predictor(name, model, fold, checkpoint):
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
+    if os.environ.get('ADRENAL_GPU_RESAMPLE') and configuration['resampling_fn_probabilities'] in (
+            'resample_logits_to_shape_sitk', 'resample_data_or_seg_to_shape'):
+        # network output -> labels on the GPU: nnU-Net's default resampling (what the SimpleITK function reproduces),
+        # one class at a time with a running argmax; checked on real scans: 0 labels changed (gpu_logits_argmax.py)
+        configuration['resampling_fn_probabilities'] = 'resample_logits_argmax_cucim'
     if configuration['resampling_fn_data'] == 'resample_data_or_seg_to_shape' and os.environ.get('ADRENAL_GPU_RESAMPLE'):
         # the CT on the GPU: a cuCIM port of nnU-Net's own scipy resampler (same interpolation and edge mode, float32),
         # vendored from adrenalSegmentator; the same kwargs as the plans

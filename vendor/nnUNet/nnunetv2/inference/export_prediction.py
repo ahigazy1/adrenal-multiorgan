@@ -27,13 +27,17 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits
         len(configuration_manager.spacing) == \
         len(properties_dict['shape_after_cropping_and_before_resampling']) else \
         [spacing_transposed[0], *configuration_manager.spacing]
-    predicted_logits = configuration_manager.resampling_fn_probabilities(predicted_logits,
+    resample = configuration_manager.resampling_fn_probabilities
+    predicted_logits = resample(predicted_logits,
                                             properties_dict['shape_after_cropping_and_before_resampling'],
                                             current_spacing,
                                             [properties_dict['spacing'][i] for i in plans_manager.transpose_forward])
     # return value of resampling_fn_probabilities can be ndarray or Tensor but that does not matter because
     # apply_inference_nonlin will convert to torch
-    if not return_probabilities:
+    if getattr(getattr(resample, 'func', resample), 'returns_labels', False):  # adrenal-multiorgan: resampled and argmaxed on the GPU
+        assert not return_probabilities, 'this resampler returns labels, not probabilities'
+        segmentation = predicted_logits
+    elif not return_probabilities:
         # this has a faster computation path because we can skip the softmax in regular (not region based) training
         segmentation = label_manager.convert_logits_to_segmentation(predicted_logits)
     else:

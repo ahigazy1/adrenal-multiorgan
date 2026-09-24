@@ -34,7 +34,8 @@ import os, subprocess
 run = lambda command: subprocess.run(command, shell=True, check=True, cwd='/content')
 run('test -d adrenal-multiorgan || git clone -q https://github.com/ahigazy1/adrenal-multiorgan; git -C adrenal-multiorgan pull -q')
 run('cp compare.py evaluate.py adrenal-multiorgan/')
-run('pip install -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 polars cupy-cuda12x cucim-cu12')  # Colab's own torch is kept
+# uv, with Colab's own torch, numpy, scipy, nibabel, polars, psutil and huggingface_hub kept as they are
+run('uv pip install --system -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 cupy-cuda12x cucim-cu12')
 if os.environ.get('ADRENAL_GPU_RESAMPLE'):  # the GPU resampler must reproduce nnU-Net's scipy one before it is used
     check = """
 import numpy as np
@@ -48,6 +49,7 @@ for new, cur, spacing in (((80, 120, 100), (1.5, 1.5, 1.5), (1.125, 1.125, 1.2))
 """
     open('/content/resampler_check.py', 'w').write(check)
     run('cd adrenal-multiorgan && python /content/resampler_check.py')
+    run('cd adrenal-multiorgan && python vendor/nnUNet/nnunetv2/preprocessing/resampling/gpu_logits_argmax.py')
 environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': os.environ.get('ADRENAL_TORCH_THREADS') or str(os.cpu_count()), 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
 subprocess.Popen('nohup python compare.py ' + os.environ['MODELS'] + ' > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
