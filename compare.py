@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import psutil
-import resource
 import signal
 import subprocess
 import sys
@@ -55,6 +54,11 @@ NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right'
 MAX_CHANGED_FRACTION = 1e-4  # accepted: batching changed 1 to 9 voxels per million on the first check; nnU-Net itself repeats exactly
 ABORT_CONDITION = f"labels_changed / voxels > {MAX_CHANGED_FRACTION} (batched against nnU-Net's own sliding window)"
 CHUNK = 20  # scans predicted between two uploads
+# RAOS (Luo et al. 2024): 413 clinical CTs from one hospital that no compared model trained on - cancer patients (Set1),
+# after surgery (Set2) and with organs removed (Set3). Its label ids, found from organ position and volume; no aorta/IVC.
+RAOS_REPO, RAOS_FOLDER = 'ahigazy1/AdrenalSeg-Sources', 'RAOS-Real'
+RAOS_LABELS = {13: 'adrenal_left', 12: 'adrenal_right', 3: 'kidney_left', 4: 'kidney_right', 1: 'liver', 2: 'spleen',
+               8: 'pancreas'}
 log = logging.getLogger('compare')
 
 
@@ -76,6 +80,44 @@ def fetch_test_scans():
         if sha256(DATA / name) != record['files'][name]['sha256']:
             raise SystemExit(f'{name} differs from the published cache')
     log.info('%d test scans verified', len(list((RAW / 'imagesTs').glob('*.nii.gz'))))
+
+
+def fetch_raos():
+    """All RAOS scans as an nnU-Net test folder, labels renumbered to ours; organs RAOS does not label stay 0."""
+    import nibabel as nib
+    import numpy as np
+    raw = DATA / 'raos'
+    if (raw / 'done').exists():
+        return raw
+    source = Path(snapshot_download(RAOS_REPO, repo_type='dataset', allow_patterns=[f'{RAOS_FOLDER}/*/images*/*',
+                                                                                   f'{RAOS_FOLDER}/*/labels*/*']))
+    (raw / 'imagesTs').mkdir(parents=True, exist_ok=True)
+    (raw / 'labelsTs').mkdir(exist_ok=True)
+    lut = np.zeros(256, np.uint8)
+    for raos, organ in RAOS_LABELS.items():
+        lut[raos] = LABELS[organ]
+    swapped = 0
+    for label in sorted(source.glob(f'{RAOS_FOLDER}/*/labels*/*.nii.gz')):
+        group = 'raos' + label.parent.parent.name.split('(Set')[1][0]  # raos1 cancer, raos2 after surgery, raos3 missing organs
+        name = f"{group}_{label.name[:-7].replace('.', '-')}"
+        folder = label.parent.parent / label.parent.name.replace('labels', 'images')
+        image = next(folder / f for f in (f'{label.name[:-7]}_0000.nii.gz', label.name) if (folder / f).exists())  # Ts vs Tr naming
+        (raw / 'imagesTs' / f'{name}_0000.nii.gz').write_bytes(image.read_bytes())
+        reference = nib.load(label)
+        values = lut[np.asanyarray(reference.dataobj)]
+        nib.save(nib.Nifti1Image(values, reference.affine), raw / 'labelsTs' / f'{name}.nii.gz')
+        # guard on the label map: the left adrenal must lie on the patient's left of the right one (RAS: smaller x)
+        canonical = nib.as_closest_canonical(nib.Nifti1Image(values, reference.affine))
+        x = {side: np.argwhere(np.asanyarray(canonical.dataobj) == LABELS[side])[:, 0]
+             for side in ('adrenal_left', 'adrenal_right')}
+        if len(x['adrenal_left']) and len(x['adrenal_right']) and x['adrenal_left'].mean() > x['adrenal_right'].mean():
+            swapped += 1
+    scans = len(list((raw / 'labelsTs').glob('*.nii.gz')))
+    log.info('RAOS: %d scans; left/right adrenal check failed on %d', scans, swapped)
+    if swapped > scans // 20:
+        raise SystemExit('The RAOS adrenal label ids look swapped: check RAOS_LABELS')
+    (raw / 'done').write_text(str(scans))
+    return raw
 
 
 def fetch_model(name):
@@ -156,7 +198,19 @@ def check_batching(name, model, fold, checkpoint):
     return result
 
 
-def predict(name, model, output, fold, checkpoint):
+def machine():
+    """Cores and bytes of memory this process may use: in a container that is its limit, not the host's."""
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count()
+    limit = Path('/sys/fs/cgroup/memory.max')
+    memory = psutil.virtual_memory().total
+    if limit.exists() and limit.read_text().strip().isdigit():
+        memory = min(memory, int(limit.read_text()))
+    if os.environ.get('ADRENAL_CPUS'):  # a container whose CPU share is set, not pinned (Modal)
+        cpus = int(os.environ['ADRENAL_CPUS'])
+    return cpus, memory
+
+
+def predict(name, model, output, fold, checkpoint, prefix='comparison'):
     import nibabel as nib
     import numpy as np
     predictor = load_predictor(name, model, fold, checkpoint)
@@ -174,15 +228,16 @@ def predict(name, model, output, fold, checkpoint):
     native.mkdir(parents=True, exist_ok=True)
     record_path.write_text(json.dumps(record, indent=2))
     # scans predicted by an earlier, lost machine: fetch them so they are not predicted again
-    snapshot_download(MODEL_REPO, allow_patterns=[f'comparison/{name}/native_labels/*'], local_dir=DATA)
+    snapshot_download(MODEL_REPO, allow_patterns=[f'{prefix}/{name}/native_labels/*'], local_dir=DATA)
     api = HfApi()
     # Export workers hold the full-size network output of a scan (classes x voxels, float32, twice), so models with many
     # classes get fewer of them. The workers are new processes and read SITK_THREADS when they start.
-    # A whole-body scan at 1 mm is ~250 M voxels: 10 GB per class-volume copy for our model, 65 GB for the 66-class ones.
-    # A machine that runs out of memory simply vanishes (twice so far), so one export at a time and the threads go to it.
-    cpus = os.cpu_count()
-    exporters = 1
-    os.environ['SITK_THREADS'] = str(cpus)
+    # Exporting (resampling every class of the network output to the scan's grid) is the slow step, so it gets parallel
+    # workers: as many as memory allows (a 66-class export peaked near 20 GB, so 25 GB each), two cores each at least.
+    cpus, memory = machine()
+    exporters = max(1, min(cpus // 2, int(memory / 25e9)))
+    os.environ['SITK_THREADS'] = str(max(1, cpus // exporters))
+    log.info('%s: %d export workers x %s SimpleITK threads on %d cores', name, exporters, os.environ['SITK_THREADS'], cpus)
     scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'))
     for start in range(0, len(scans), CHUNK):  # after every chunk the predictions are safe on Hugging Face
         chunk = [s for s in scans[start:start + CHUNK] if not (native / s.name.replace('_0000', '')).exists()]
@@ -190,13 +245,12 @@ def predict(name, model, output, fold, checkpoint):
             continue
         predictor.predict_from_files([[str(s)] for s in chunk], [str(native / s.name[:-12]) for s in chunk],
                                      save_probabilities=False, overwrite=False,
-                                     num_processes_preprocessing=2, num_processes_segmentation_export=exporters)
-        api.upload_folder(repo_id=MODEL_REPO, folder_path=native, path_in_repo=f'comparison/{name}/native_labels',
+                                     num_processes_preprocessing=max(2, cpus // 4), num_processes_segmentation_export=exporters)
+        api.upload_folder(repo_id=MODEL_REPO, folder_path=native, path_in_repo=f'{prefix}/{name}/native_labels',
                           commit_message=f'{name}: {min(start + CHUNK, len(scans))} of {len(scans)} scans')
         memory = psutil.virtual_memory()
-        log.info('%s: %d of %d scans predicted and uploaded; memory in use %.0f of %.0f GB (peak of this process %.0f GB)',
-                 name, min(start + CHUNK, len(scans)), len(scans), memory.used / 1e9, memory.total / 1e9,
-                 resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6)
+        log.info('%s: %d of %d scans predicted and uploaded; memory in use %.0f of %.0f GB',
+                 name, min(start + CHUNK, len(scans)), len(scans), memory.used / 1e9, memory.total / 1e9)
     lut = np.zeros(256, np.uint8)
     lut[list(mapping)] = list(mapping.values())
     for path in sorted(native.glob('*.nii.gz')):
@@ -207,7 +261,11 @@ def predict(name, model, output, fold, checkpoint):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('models', nargs='+', choices=list(MODELS))
+    parser.add_argument('--dataset', choices=['test', 'raos'], default='test')
     args = parser.parse_args()
+    global RAW
+    prefix = 'comparison' if args.dataset == 'test' else 'comparison-raos'
+    organs = [] if args.dataset == 'test' else ['--organs', *RAOS_LABELS.values()]
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     log.info('main_then_release is active: the Colab runtime is released on every exit path')
     console = os.environ.get('ADRENAL_COMPARE_LOG')
@@ -229,23 +287,27 @@ def main():
                          memory.used / 1e9, memory.total / 1e9, memory.available / 1e9, disk.free / 1e9)
                 time.sleep(15)
         threading.Thread(target=sample_memory, daemon=True).start()
-    fetch_test_scans()
+    if args.dataset == 'raos':
+        RAW = fetch_raos()
+    else:
+        fetch_test_scans()
     checks = [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
-    (DATA / 'comparison').mkdir(exist_ok=True)
-    (DATA / 'comparison/batching_check.json').write_text(json.dumps(checks, indent=2))
-    HfApi().upload_file(repo_id=MODEL_REPO, path_or_fileobj=DATA / 'comparison/batching_check.json',
-                        path_in_repo='comparison/batching_check.json', commit_message='batched sliding window check')
+    (DATA / prefix).mkdir(exist_ok=True)
+    check_file = DATA / prefix / f"batching_check_{'_'.join(args.models)}.json"
+    check_file.write_text(json.dumps(checks, indent=2))
+    HfApi().upload_file(repo_id=MODEL_REPO, path_or_fileobj=check_file, path_in_repo=f'{prefix}/{check_file.name}',
+                        commit_message='batched sliding window check')
     if not all(check['passed'] for check in checks):
         raise SystemExit("The batched sliding window disagrees with nnU-Net's own: nothing was predicted")
     for name in args.models:
-        output = DATA / 'comparison' / name
+        output = DATA / prefix / name
         log.info('=== %s', name)
-        predict(name, fetch_model(name), output, *MODELS[name][3:])
+        predict(name, fetch_model(name), output, *MODELS[name][3:], prefix=prefix)
         # evaluate.py checks that every scan has a prediction
-        subprocess.run([sys.executable, str(ROOT / 'evaluate.py'), str(RAW / 'labelsTs'), str(output)], check=True)
-        HfApi().upload_folder(repo_id=MODEL_REPO, folder_path=output, path_in_repo=f'comparison/{name}',
-                              commit_message=f'comparison on the held-out test scans: {name}')
-        log.info('Uploaded comparison/%s to %s', name, MODEL_REPO)
+        subprocess.run([sys.executable, str(ROOT / 'evaluate.py'), str(RAW / 'labelsTs'), str(output), *organs], check=True)
+        HfApi().upload_folder(repo_id=MODEL_REPO, folder_path=output, path_in_repo=f'{prefix}/{name}',
+                              commit_message=f'{prefix}: {name}')
+        log.info('Uploaded %s/%s to %s', prefix, name, MODEL_REPO)
 
 
 def release_runtime(reason):

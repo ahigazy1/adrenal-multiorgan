@@ -17,6 +17,7 @@ of them scores Dice 0 and NSD 0; present in the reference but not predicted also
 import argparse
 import json
 import os
+from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -32,7 +33,7 @@ TOLERANCES_MM = [0.5, 0.8, 1.0]
 REPORTS = {'all_organs': list(LABELS), 'adrenal': ['adrenal_left', 'adrenal_right'], 'aorta': ['aorta']}
 
 
-def score_scan(paths):
+def score_scan(paths, organs=tuple(LABELS)):
     reference_path, prediction_path = paths
     reference, prediction = nib.load(reference_path), nib.load(prediction_path)
     if reference.shape != prediction.shape or not np.allclose(reference.affine, prediction.affine, atol=1e-3):
@@ -41,7 +42,8 @@ def score_scan(paths):
     spacing = nib.affines.voxel_sizes(reference.affine)
     voxel_ml = float(np.prod(spacing)) / 1000
     rows = []
-    for organ, value in LABELS.items():
+    for organ in organs:
+        value = LABELS[organ]
         a, b = truth == value, predicted == value
         in_truth, in_prediction = int(a.sum()), int(b.sum())
         row = {'case': reference_path.name[:-7], 'source': reference_path.name.split('_')[0], 'organ': organ,
@@ -76,26 +78,31 @@ def main():
     parser.add_argument('labels', type=Path)
     parser.add_argument('predictions', type=Path)
     parser.add_argument('--workers', type=int, default=os.cpu_count())
+    parser.add_argument('--organs', nargs='+', choices=list(LABELS), default=list(LABELS),
+                        help='only these (a test set that does not label every organ)')
     args = parser.parse_args()
     references = sorted(args.labels.glob('*.nii.gz'))
     missing = [r.name for r in references if not (args.predictions / r.name).exists()]
     if missing or not references:
         raise SystemExit(f'{len(missing)} of {len(references)} scans have no prediction, e.g. {missing[:3]}')
     with Pool(args.workers) as pool:
-        rows = [row for scan in pool.imap(score_scan, [(r, args.predictions / r.name) for r in references]) for row in scan]
+        rows = [row for scan in pool.imap(partial(score_scan, organs=args.organs),
+                                          [(r, args.predictions / r.name) for r in references]) for row in scan]
     frame = pl.DataFrame(rows, infer_schema_length=None)
     output = args.predictions / 'evaluation'
     output.mkdir(exist_ok=True)
     frame.write_csv(output / 'per_case.csv')
     for name, organs in REPORTS.items():
         part = frame.filter(pl.col('organ').is_in(organs))
+        if part.is_empty():
+            continue
         summarise(part, ['organ']).write_csv(output / f'{name}.csv')
         summarise(part, ['source', 'organ']).write_csv(output / f'{name}_by_source.csv')
         print(f'\n=== {name} ===')
         with pl.Config(ascii_tables=True, tbl_cols=-1, tbl_rows=-1, tbl_width_chars=250):
             print(summarise(part, ['organ']))
     (output / 'settings.json').write_text(json.dumps({
-        'scans': len(references), 'labels': LABELS, 'nsd_tolerances_mm': TOLERANCES_MM, 'nsd_package': 'surface-distance 0.1',
+        'scans': len(references), 'labels': {organ: LABELS[organ] for organ in args.organs}, 'nsd_tolerances_mm': TOLERANCES_MM, 'nsd_package': 'surface-distance 0.1',
         'volume_error': 'prediction minus reference, mL', 'absent_in_both': 'not scored', 'missed_organ': 'Dice 0, NSD 0'}, indent=2))
 
 
