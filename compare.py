@@ -233,9 +233,10 @@ def predict(name, model, output, fold, checkpoint, prefix='comparison'):
     # Export workers hold the full-size network output of a scan (classes x voxels, float32, twice), so models with many
     # classes get fewer of them. The workers are new processes and read SITK_THREADS when they start.
     # Exporting (resampling every class of the network output to the scan's grid) is the slow step, so it gets parallel
-    # workers: as many as memory allows (a 66-class export peaked near 20 GB, so 25 GB each), two cores each at least.
+    # workers: as many as memory allows, two cores each at least. A 66-class export of a whole-body TotalSegmentator scan
+    # peaked near 20 GB; RAOS scans are abdomen-only, and 16 workers of the 66-class model fitted in 128 GiB.
     cpus, memory = machine()
-    exporters = max(1, min(cpus // 2, int(memory / 25e9)))
+    exporters = max(1, min(cpus // 2, int(memory / float(os.environ.get('ADRENAL_EXPORT_GB', 25)) / 1e9)))
     os.environ['SITK_THREADS'] = str(max(1, cpus // exporters))
     log.info('%s: %d export workers x %s SimpleITK threads on %d cores', name, exporters, os.environ['SITK_THREADS'], cpus)
     scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'))
