@@ -120,6 +120,54 @@ def fetch_raos():
     return raw
 
 
+def fetch_external():
+    """Every labelled AMOS22 CT (300) and BTCV (30) scan from the pinned sources prepare.sh uses, labels renumbered to
+    ours, named as build_dataset.py names them. No quality exclusion: the 8 scans it excluded are flagged when scoring."""
+    import nibabel as nib
+    import numpy as np
+    from cohort_scan import LABEL_IDS
+    raw = DATA / 'external'
+    if (raw / 'done').exists():
+        return raw
+    sources = {'amos': ('MedOtter/amos22-ct-dataset', 'c67f7c01e66277038d87975b03b73ece489a3035',
+                        [('train/labelsTr', 'train/imagesTr'), ('valid/labelsVa', 'valid/imagesVa')]),
+               'btcv': ('lingheng123/btcv', 'c1728b451a00c054875a0a97d7658d1eaf8362b5',
+                        [('RawData/Training/label', 'RawData/Training/img')])}
+    (raw / 'imagesTs').mkdir(parents=True, exist_ok=True)
+    (raw / 'labelsTs').mkdir(exist_ok=True)
+    for source, (repo, revision, folders) in sources.items():
+        root = Path(snapshot_download(repo, repo_type='dataset', revision=revision,
+                                      allow_patterns=[f'{folder}/*' for pair in folders for folder in pair]))
+        lut = np.zeros(256, np.uint8)
+        for organ, value in LABEL_IDS[source].items():
+            lut[value] = LABELS[organ]
+        for labels, images in folders:
+            for label in sorted((root / labels).glob('*.nii.gz')):
+                case = label.name[:-7]
+                name = case if case.lower().startswith(source) else f'{source}_{case}'  # amos_0001, btcv_label0001
+                (raw / 'imagesTs' / f'{name}_0000.nii.gz').write_bytes((root / images / label.name.replace('label', 'img')).read_bytes())
+                reference = nib.load(label)
+                nib.save(nib.Nifti1Image(lut[np.asanyarray(reference.dataobj)], reference.affine), raw / 'labelsTs' / f'{name}.nii.gz')
+    scans = len(list((raw / 'labelsTs').glob('*.nii.gz')))
+    log.info('AMOS22 + BTCV: %d labelled scans', scans)
+    (raw / 'done').write_text(str(scans))
+    return raw
+
+
+def reuse_test_predictions(name, prefix):
+    """Scans of this set already predicted in the test-set comparison are copied on Hugging Face, not predicted again."""
+    from huggingface_hub import CommitOperationCopy
+    api = HfApi()
+    have = {f.path.split('/')[-1] for f in api.list_repo_tree(MODEL_REPO, f'{prefix}/{name}/native_labels')} \
+        if any(f.path == f'{prefix}/{name}' for f in api.list_repo_tree(MODEL_REPO, prefix)) else set()
+    done = [f.path for f in api.list_repo_tree(MODEL_REPO, f'comparison/{name}/native_labels')
+            if f.path.split('/')[-1].startswith(('amos_', 'btcv_')) and f.path.split('/')[-1] not in have]
+    if done:
+        api.create_commit(MODEL_REPO, [CommitOperationCopy(p, p.replace('comparison/', f'{prefix}/', 1)) for p in done],
+                          commit_message=f'{prefix}/{name}: reuse {len(done)} test-set predictions')
+    log.info('%s: %d scans reused from the test-set comparison', name, len(done))
+
+
 def fetch_model(name):
     repo, repo_type, folder, fold, checkpoint = MODELS[name]
     target = DATA / 'comparison_models' / name
@@ -237,6 +285,7 @@ def predict(name, model, output, fold, checkpoint, prefix='comparison'):
     # peaked near 20 GB; RAOS scans are abdomen-only, and 16 workers of the 66-class model fitted in 128 GiB.
     cpus, memory = machine()
     exporters = max(1, min(cpus // 2, int(memory / float(os.environ.get('ADRENAL_EXPORT_GB', 25)) / 1e9)))
+    exporters = int(os.environ.get('ADRENAL_EXPORTERS') or 0) or exporters  # a fixed number if one is given
     os.environ['SITK_THREADS'] = str(max(1, cpus // exporters))
     log.info('%s: %d export workers x %s SimpleITK threads on %d cores', name, exporters, os.environ['SITK_THREADS'], cpus)
     scans = sorted((RAW / 'imagesTs').glob('*_0000.nii.gz'))
@@ -262,11 +311,12 @@ def predict(name, model, output, fold, checkpoint, prefix='comparison'):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('models', nargs='+', choices=list(MODELS))
-    parser.add_argument('--dataset', choices=['test', 'raos'], default='test')
+    parser.add_argument('--dataset', choices=['test', 'raos', 'external'], default='test')
+    parser.add_argument('--skip-check', action='store_true', help='models that already passed the batching check')
     args = parser.parse_args()
     global RAW
-    prefix = 'comparison' if args.dataset == 'test' else 'comparison-raos'
-    organs = [] if args.dataset == 'test' else ['--organs', *RAOS_LABELS.values()]
+    prefix = {'test': 'comparison', 'raos': 'comparison-raos', 'external': 'comparison-external'}[args.dataset]
+    organs = ['--organs', *RAOS_LABELS.values()] if args.dataset == 'raos' else []
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     log.info('main_then_release is active: the Colab runtime is released on every exit path')
     console = os.environ.get('ADRENAL_COMPARE_LOG')
@@ -290,9 +340,13 @@ def main():
         threading.Thread(target=sample_memory, daemon=True).start()
     if args.dataset == 'raos':
         RAW = fetch_raos()
+    elif args.dataset == 'external':
+        RAW = fetch_external()
+        for name in args.models:
+            reuse_test_predictions(name, prefix)
     else:
         fetch_test_scans()
-    checks = [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
+    checks = [] if args.skip_check else [check_batching(name, fetch_model(name), *MODELS[name][3:]) for name in args.models]
     (DATA / prefix).mkdir(exist_ok=True)
     check_file = DATA / prefix / f"batching_check_{'_'.join(args.models)}.json"
     check_file.write_text(json.dumps(checks, indent=2))

@@ -40,7 +40,7 @@ subprocess.Popen('nohup python compare.py ' + os.environ['MODELS'] + ' > /conten
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
 print('started; follow it with: bash colab_compare.sh log')
 EOF
-colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" -f /tmp/adrenal_start.py
+colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" --env ADRENAL_EXPORTERS="${ADRENAL_EXPORTERS:-0}" -f /tmp/adrenal_start.py
 # Colab reclaims a runtime nobody talks to. Refresh its idle timer every 5 minutes for as long as it exists.
 cat > /tmp/adrenal_keepalive.py <<'PY'
 import time
