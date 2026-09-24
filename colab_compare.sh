@@ -46,7 +46,8 @@ for new, cur, spacing in (((80, 120, 100), (1.5, 1.5, 1.5), (1.125, 1.125, 1.2))
     d = float(np.abs(a - b).max()); print('cuCIM vs scipy, largest difference', d)
     assert d < 1e-3, d
 """
-    run(f"cd adrenal-multiorgan && python -c '{check}'")
+    open('/content/resampler_check.py', 'w').write(check)
+    run('cd adrenal-multiorgan && python /content/resampler_check.py')
 environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': str(os.cpu_count()), 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
 subprocess.Popen('nohup python compare.py ' + os.environ['MODELS'] + ' > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
