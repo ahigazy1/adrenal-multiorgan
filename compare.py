@@ -210,6 +210,10 @@ def load_predictor(name, model, fold, checkpoint):
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
+    if configuration['resampling_fn_data'] == 'resample_data_or_seg_to_shape' and os.environ.get('ADRENAL_GPU_RESAMPLE'):
+        # the CT on the GPU: a cuCIM port of nnU-Net's own scipy resampler (same interpolation and edge mode, float32),
+        # vendored from adrenalSegmentator; the same kwargs as the plans
+        configuration['resampling_fn_data'] = 'resample_data_or_seg_to_shape_cucim'
     return predictor
 
 

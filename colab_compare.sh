@@ -34,13 +34,25 @@ import os, subprocess
 run = lambda command: subprocess.run(command, shell=True, check=True, cwd='/content')
 run('test -d adrenal-multiorgan || git clone -q https://github.com/ahigazy1/adrenal-multiorgan; git -C adrenal-multiorgan pull -q')
 run('cp compare.py evaluate.py adrenal-multiorgan/')
-run('pip install -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 polars')  # Colab's own torch is kept
+run('pip install -q -e adrenal-multiorgan/vendor/nnUNet surface-distance==0.1 polars cupy-cuda12x cucim-cu12')  # Colab's own torch is kept
+if os.environ.get('ADRENAL_GPU_RESAMPLE'):  # the GPU resampler must reproduce nnU-Net's scipy one before it is used
+    check = """
+import numpy as np
+from nnunetv2.preprocessing.resampling.default_resampling import resample_data_or_seg_to_shape as cpu
+from nnunetv2.preprocessing.resampling.cucim_resampling import resample_data_or_seg_to_shape_cucim as gpu
+x = np.random.default_rng(0).normal(0, 1, (1, 60, 90, 80)).astype(np.float32)
+for new, cur, spacing in (((80, 120, 100), (1.5, 1.5, 1.5), (1.125, 1.125, 1.2)), ((150, 110, 90), (5, 0.8, 0.8), (2, 0.65, 0.71))):
+    a, b = cpu(x, new, cur, spacing, order=3), gpu(x, new, cur, spacing, order=3)
+    d = float(np.abs(a - b).max()); print('cuCIM vs scipy, largest difference', d)
+    assert d < 1e-3, d
+"""
+    run(f"cd adrenal-multiorgan && python -c '{check}'")
 environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': str(os.cpu_count()), 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
 subprocess.Popen('nohup python compare.py ' + os.environ['MODELS'] + ' > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
 print('started; follow it with: bash colab_compare.sh log')
 EOF
-colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" --env ADRENAL_EXPORTERS="${ADRENAL_EXPORTERS:-0}" -f /tmp/adrenal_start.py
+colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" --env ADRENAL_EXPORTERS="${ADRENAL_EXPORTERS:-0}" --env ADRENAL_GPU_RESAMPLE="${ADRENAL_GPU_RESAMPLE:-}" -f /tmp/adrenal_start.py
 # Colab reclaims a runtime nobody talks to. Refresh its idle timer every 5 minutes for as long as it exists.
 cat > /tmp/adrenal_keepalive.py <<'PY'
 import time
