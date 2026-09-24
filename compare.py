@@ -158,8 +158,7 @@ def reuse_test_predictions(name, prefix):
     """Scans of this set already predicted in the test-set comparison are copied on Hugging Face, not predicted again."""
     from huggingface_hub import CommitOperationCopy
     api = HfApi()
-    have = {f.path.split('/')[-1] for f in api.list_repo_tree(MODEL_REPO, f'{prefix}/{name}/native_labels')} \
-        if any(f.path == f'{prefix}/{name}' for f in api.list_repo_tree(MODEL_REPO, prefix)) else set()
+    have = {f.split('/')[-1] for f in api.list_repo_files(MODEL_REPO) if f.startswith(f'{prefix}/{name}/native_labels/')}
     done = [f.path for f in api.list_repo_tree(MODEL_REPO, f'comparison/{name}/native_labels')
             if f.path.split('/')[-1].startswith(('amos_', 'btcv_')) and f.path.split('/')[-1] not in have]
     if done:
