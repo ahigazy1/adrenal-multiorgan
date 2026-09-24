@@ -29,7 +29,8 @@ def token():
     names = [k for k in os.environ if 'HF' in k or 'HUGGING' in k]
     os.environ.setdefault('HF_TOKEN', next((os.environ[k] for k in names if 'TOKEN' in k), ''))
     assert os.environ['HF_TOKEN'], f'no token in huggingface-secret (keys: {names})'
-    os.environ.update(HF_HUB_DISABLE_PROGRESS_BARS='1', nnUNet_def_n_proc=str(CPUS), PYTHONPATH='/app', ADRENAL_CPUS=str(CPUS))
+    os.environ.update(HF_HUB_DISABLE_PROGRESS_BARS='1', nnUNet_def_n_proc=str(CPUS), PYTHONPATH='/app', ADRENAL_CPUS=str(CPUS),
+                      ADRENAL_MEMORY_GB=str(int(MEMORY_GIB * 1.07)))
 
 
 @app.function(gpu='RTX-PRO-6000', **settings)

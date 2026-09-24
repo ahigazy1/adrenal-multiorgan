@@ -205,8 +205,8 @@ def machine():
     memory = psutil.virtual_memory().total
     if limit.exists() and limit.read_text().strip().isdigit():
         memory = min(memory, int(limit.read_text()))
-    if os.environ.get('ADRENAL_CPUS'):  # a container whose CPU share is set, not pinned (Modal)
-        cpus = int(os.environ['ADRENAL_CPUS'])
+    if os.environ.get('ADRENAL_CPUS'):  # a container that shows the host's cores and memory, not its share (Modal)
+        cpus, memory = int(os.environ['ADRENAL_CPUS']), int(os.environ['ADRENAL_MEMORY_GB']) * 1e9
     return cpus, memory
 
 
