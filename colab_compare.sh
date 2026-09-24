@@ -48,12 +48,12 @@ for new, cur, spacing in (((80, 120, 100), (1.5, 1.5, 1.5), (1.125, 1.125, 1.2))
 """
     open('/content/resampler_check.py', 'w').write(check)
     run('cd adrenal-multiorgan && python /content/resampler_check.py')
-environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': str(os.cpu_count()), 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
+environment = os.environ | {'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'nnUNet_def_n_proc': os.environ.get('ADRENAL_TORCH_THREADS') or str(os.cpu_count()), 'ADRENAL_COMPARE_LOG': '/content/compare.log'}  # 4 torch threads per export worker; train.py turns torch.compile on
 subprocess.Popen('nohup python compare.py ' + os.environ['MODELS'] + ' > /content/compare.log 2>&1', shell=True,
                  cwd='/content/adrenal-multiorgan', env=environment, start_new_session=True)
 print('started; follow it with: bash colab_compare.sh log')
 EOF
-colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" --env ADRENAL_EXPORTERS="${ADRENAL_EXPORTERS:-0}" --env ADRENAL_GPU_RESAMPLE="${ADRENAL_GPU_RESAMPLE:-}" -f /tmp/adrenal_start.py
+colab exec -s $SESSION --timeout 1200 --env HF_TOKEN="$TOKEN" --env MODELS="${MODELS:-ours atlasnet labmate997-reoriented labmate998}" --env ADRENAL_EXPORTERS="${ADRENAL_EXPORTERS:-0}" --env ADRENAL_GPU_RESAMPLE="${ADRENAL_GPU_RESAMPLE:-}" --env ADRENAL_TORCH_THREADS="${ADRENAL_TORCH_THREADS:-}" -f /tmp/adrenal_start.py
 # Colab reclaims a runtime nobody talks to. Refresh its idle timer every 5 minutes for as long as it exists.
 cat > /tmp/adrenal_keepalive.py <<'PY'
 import time
