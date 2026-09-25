@@ -210,16 +210,17 @@ def complete_path(recipe: str) -> str:
 
 class Hub:
     """Small transport boundary so failure/recovery behavior can be tested offline."""
-    def __init__(self, repo: str, repo_type: str):
+    def __init__(self, repo: str, repo_type: str, *, allow_public: bool = False):
         from huggingface_hub import HfApi
         self.api = HfApi()
         self.repo, self.repo_type = repo, repo_type
+        self.allow_public = allow_public
         # Also fail early on a bad token. Never translate 401/403/404 into a cache miss.
-        self.api.create_repo(repo, repo_type=repo_type, private=True, exist_ok=True)
+        self.api.create_repo(repo, repo_type=repo_type, private=not allow_public, exist_ok=True)
 
     def info(self):
         result = self.api.repo_info(self.repo, repo_type=self.repo_type, files_metadata=True)
-        if not result.private:
+        if not result.private and not self.allow_public:
             raise RuntimeError(f'Refusing to use a public artifact repository: {self.repo}')
         return result.sha, {p.rfilename: p for p in result.siblings}
 

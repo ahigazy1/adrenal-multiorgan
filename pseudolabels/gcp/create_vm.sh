@@ -11,31 +11,49 @@
 # Same machine as training: g4-standard-48 (RTX PRO 6000 96 GB, 48 vCPUs), Spot, Ubuntu Pro with the NVIDIA driver.
 set -euo pipefail
 NAME=adrenal-pseudo
+PSEUDO_WORKERS=${PSEUDO_WORKERS:-12}
+[[ "$PSEUDO_WORKERS" =~ ^([1-9]|1[0-2])$ ]] || { echo "PSEUDO_WORKERS must be between 1 and 12"; exit 1; }
 DISK_GB=200          # sources about 60 GB, pseudo-labels a few GB
 DISK_IOPS=10000      # disk speed as in our test runs; it is a large part of the disk's price
 DISK_MB_PER_S=1050
 MAX_HOURS=100        # Google stops the machine after this long in one go, whatever it is doing: a ceiling on the bill
 IMAGE="image-family=ubuntu-pro-accel-2604-amd64-nvidia-595,image-project=ubuntu-os-accelerator-images"
 HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(git -C "$HERE/../.." rev-parse --show-toplevel)
+# Never launch an older remote runner while local safeguards are uncommitted.
+DIRTY=$(git -C "$ROOT" status --porcelain --untracked-files=all -- pseudolabels hf_cache.py tests/test_hf_cache.py vendor/nnUNet/nnunetv2/preprocessing/resampling)
+[ -z "$DIRTY" ] || { echo "Pseudo-label deployment files have local changes. Commit and publish the complete reviewed snapshot first."; exit 1; }
+REVISION=$(git -C "$ROOT" rev-parse HEAD)
+git -C "$ROOT" fetch origin main
+git -C "$ROOT" merge-base --is-ancestor "$REVISION" FETCH_HEAD \
+    || { echo "Local HEAD is not published in origin/main history. Deploy the reviewed revision before launching."; exit 1; }
 command -v cygpath >/dev/null && HERE=$(cygpath -m "$HERE")   # Git Bash on Windows: gcloud needs a Windows-style path
 PROJECT=$(gcloud config get-value project 2>/dev/null)
-[ -n "$PROJECT" ] || { echo "No project selected. Choose one in the console, or run: gcloud config set project YOUR_PROJECT"; exit 1; }
+[ -n "$PROJECT" ] && [ "$PROJECT" != '(unset)' ] || { echo "No project selected. Choose one in the console, or run: gcloud config set project YOUR_PROJECT"; exit 1; }
 echo "Project: $PROJECT"
 gcloud services enable compute.googleapis.com secretmanager.googleapis.com logging.googleapis.com
 
 # Already created? Then just start it. Its disk lives in one zone, so it can only start there.
 ZONE=$(gcloud compute instances list --filter="name=$NAME" --format="value(zone.basename())")
 if [ -n "$ZONE" ]; then
-    echo "$NAME exists in $ZONE; refreshing its startup script and starting it."
-    gcloud compute instances add-metadata "$NAME" --zone="$ZONE" --metadata-from-file=startup-script="$HERE/startup.sh"
+    PINNED=$(gcloud compute instances list --flatten='metadata.items[]' --filter="name=$NAME AND metadata.items.key=pseudo-revision" --format='value(metadata.items.value)')
+    [ "$PINNED" = "$REVISION" ] || { echo "Existing VM uses another or unpinned revision. Resume its original checkout; do not change code mid-run."; exit 1; }
+    STATUS=$(gcloud compute instances describe "$NAME" --zone="$ZONE" --format='value(status)')
+    if [ "$STATUS" = RUNNING ]; then
+        echo "$NAME is already running at $REVISION. No settings changed."
+        exit 0
+    fi
+    echo "$NAME exists in $ZONE; resuming pinned revision $REVISION."
+    gcloud compute instances add-metadata "$NAME" --zone="$ZONE" --metadata-from-file=startup-script="$HERE/startup.sh" \
+        --metadata="pseudo-workers=$PSEUDO_WORKERS,pseudo-revision=$REVISION"
     gcloud compute instances start "$NAME" --zone="$ZONE" \
         || { echo "Could not start it. If the message above mentions resources or capacity, $ZONE has no free machine right now: nothing is lost, run this again in an hour."; exit 1; }
     echo "Started. It continues by itself. Progress: NAME=$NAME bash $HERE/../../gcp/progress.sh"
     exit 0
 fi
 
-# The Hugging Face token (write access to ahigazy1/adrenal-multiorgan-cache and
-# ahigazy1/adrenal-multiorgan-model) is kept in Secret Manager under the name HF_TOKEN, not on the disk and not in
+# The Hugging Face token (write access to ahigazy1/adrenal-pseudolabels)
+# is kept in Secret Manager under the name HF_TOKEN, not on the disk and not in
 # this repository. If the secret already exists it is used as it is.
 if ! gcloud secrets describe HF_TOKEN >/dev/null 2>&1; then
     read -r -s -p "Paste the Hugging Face token, then press Enter (nothing is shown while you paste): " TOKEN; echo
@@ -57,7 +75,7 @@ for ZONE in $ZONES; do
         --create-disk="auto-delete=no,boot=yes,size=$DISK_GB,type=hyperdisk-balanced,provisioned-iops=$DISK_IOPS,provisioned-throughput=$DISK_MB_PER_S,$IMAGE" \
         --network-interface=network=default,nic-type=GVNIC \
         --service-account="$ACCOUNT" --scopes=cloud-platform \
-        --metadata=serial-port-logging-enable=true --metadata-from-file=startup-script="$HERE/startup.sh" \
+        --metadata="serial-port-logging-enable=true,pseudo-workers=$PSEUDO_WORKERS,pseudo-revision=$REVISION" --metadata-from-file=startup-script="$HERE/startup.sh" \
         --labels=workload=adrenal-pseudo 2>&1); then
         echo "Created $NAME in $ZONE. It installs TotalSegmentator, downloads the scans and labels them; it switches itself off when done."
         echo "Progress: NAME=$NAME bash $HERE/../../gcp/progress.sh"

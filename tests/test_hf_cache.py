@@ -60,6 +60,22 @@ class FakeHub:
 
 
 class CacheTests(unittest.TestCase):
+    def test_public_output_requires_explicit_opt_in(self):
+        calls = []
+        info = SimpleNamespace(private=False, sha='revision', siblings=[])
+        api = SimpleNamespace(create_repo=lambda *a, **kw: calls.append(kw), repo_info=lambda *a, **kw: info)
+        with patch.dict(sys.modules, {'huggingface_hub': SimpleNamespace(HfApi=lambda: api)}):
+            private_hub = cache.Hub('owner/private-cache', 'dataset')
+            with self.assertRaises(RuntimeError):
+                private_hub.info()
+            public_hub = cache.Hub('owner/pseudolabels', 'dataset', allow_public=True)
+            self.assertEqual(public_hub.info(), ('revision', {}))
+            # Making the output private later must not break resume or force public visibility.
+            info.private = True
+            self.assertEqual(public_hub.info(), ('revision', {}))
+        self.assertTrue(calls[0]['private'])
+        self.assertFalse(calls[1]['private'])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

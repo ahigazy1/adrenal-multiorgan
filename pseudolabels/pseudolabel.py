@@ -1,33 +1,40 @@
-"""TotalSegmentator pseudo-labels for AMOS22 CT, BTCV, FLARE22 and RAOS, in D998's 66 classes.
+"""TotalSegmentator pseudo-labels for labelled AMOS22 CT, BTCV and FLARE22.
 
-    python pseudolabel.py --data /opt/pseudo --workers 4
+    python pseudolabels/pseudolabel.py --data /opt/pseudo
 
-One uint8 NIfTI per labelled scan, on the scan's own grid, with D998's ids (dataset.json below); every other
+One uint8 NIfTI per labelled scan, on the scan's own grid, with D997/D998's shared ids; every other
 TotalSegmentator class is 0, kidney cysts are merged into their kidney. Nothing else is changed: merging with the real
 labels (real labels win, pseudo-labels become the ignore label) is a later step.
 
-Files go to the private dataset ahigazy1/adrenal-multiorgan-cache under pseudolabels/totalseg-<version>/<source>/<case>.nii.gz,
-uploaded every UPLOAD_EVERY scans. Cases already there are skipped, so an interrupted run continues where it stopped.
+Files go to the private dataset ahigazy1/adrenal-multiorgan-cache under
+pseudolabels/totalseg-<version>/<recipe>/<source>/<case>.nii.gz. The first scan, then batches of 25,
+are committed with a checksum manifest. Only verified remote results are skipped on resume.
 """
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import json
 import multiprocessing
-import platform
+import os
+import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import nibabel as nib
 import numpy as np
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import snapshot_download
 
-REPO = 'ahigazy1/adrenal-multiorgan-cache'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from hf_cache import Hub, digest, encoded, file_info, safe_path, verify_remote
+from runtime import THREADS, setup as setup_runtime
+
+REPO = 'ahigazy1/adrenal-pseudolabels'
 UPLOAD_EVERY = 25
+NNUNET_COMMIT = '940dcd3ba8e9f9a1c21885ca52acd2f06328b6fc'
 # Sources at pinned revisions (the same as ../prepare.sh), downloaded one after the other (parallel gets HTTP 429).
 SOURCES = {
-    'amos': ('MedOtter/amos22-ct-dataset', 'c67f7c01e66277038d87975b03b73ece489a3035', ['train/*', 'valid/*']),
-    'btcv': ('lingheng123/btcv', 'c1728b451a00c054875a0a97d7658d1eaf8362b5', ['RawData/Training/*']),
-    'flare': ('MedOtter/FLARE22', 'ab0b99b53e2183fe59321b5888867c6c7cb0792a', ['images/*', 'labels/*']),
-    'raos': ('ahigazy1/AdrenalSeg-Sources', None, ['RAOS-Real/*/images*/*', 'RAOS-Real/*/labels*/*']),
+    'amos': ('MedOtter/amos22-ct-dataset', 'c67f7c01e66277038d87975b03b73ece489a3035', 300),
+    'btcv': ('lingheng123/btcv', 'c1728b451a00c054875a0a97d7658d1eaf8362b5', 30),
+    'flare': ('MedOtter/FLARE22', 'ab0b99b53e2183fe59321b5888867c6c7cb0792a', 50),
 }
 # D998 (Dataset998_TotalSeg66classes) label ids; the names are TotalSegmentator v2's own.
 D998 = ['spleen', 'kidney_right', 'kidney_left', 'gallbladder', 'liver', 'stomach', 'pancreas', 'adrenal_gland_right',
@@ -59,98 +66,182 @@ def lookup():
     return lut
 
 
-def scans(data):
-    """(source, case, image) for every labelled scan; case is the label file's name without .nii.gz."""
-    for source, (repo, revision, patterns) in SOURCES.items():
-        root = Path(snapshot_download(repo, repo_type='dataset', revision=revision, allow_patterns=patterns,
-                                      local_dir=data / 'sources' / source))
-        if source == 'amos':
-            for labels, images in (('train/labelsTr', 'train/imagesTr'), ('valid/labelsVa', 'valid/imagesVa')):
-                for label in sorted((root / labels).glob('*.nii.gz')):
-                    yield source, label.name[:-7], root / images / label.name
-        elif source == 'btcv':
-            for label in sorted((root / 'RawData/Training/label').glob('*.nii.gz')):
-                yield source, label.name[:-7], root / 'RawData/Training/img' / label.name.replace('label', 'img')
-        elif source == 'flare':
-            for label in sorted((root / 'labels').glob('*.nii.gz')):
-                yield source, label.name[:-7], root / 'images' / f'{label.name[:-7]}_0000.nii.gz'
-        else:  # RAOS: three sets (cancer, after surgery, organs removed), Tr and Ts image naming differ
-            for label in sorted(root.glob('RAOS-Real/*/labels*/*.nii.gz')):
-                group = 'raos' + label.parent.parent.name.split('(Set')[1][0]
-                folder = label.parent.parent / label.parent.name.replace('labels', 'images')
-                image = next(folder / f for f in (f'{label.name[:-7]}_0000.nii.gz', label.name) if (folder / f).exists())
-                yield source, f"{group}_{label.name[:-7].replace('.', '-')}", image
+def scans(api):
+    """Validate the pinned inventory before downloading images or running inference."""
+    cases = {}
+    for source, (repo, revision, expected) in SOURCES.items():
+        names = set(api.list_repo_files(repo, repo_type='dataset', revision=revision))
+        count = 0
+        for name in sorted(names):
+            label = PurePosixPath(name)
+            if not name.endswith('.nii.gz'):
+                continue
+            if source == 'amos' and label.parent.as_posix() in ('train/labelsTr', 'valid/labelsVa'):
+                candidates = [name.replace('/labels', '/images')]
+            elif source == 'btcv' and label.parent.as_posix() == 'RawData/Training/label':
+                candidates = [name.replace('/label/label', '/img/img')]
+            elif source == 'flare' and label.parent.as_posix() == 'labels':
+                candidates = [f'images/{label.name[:-7]}_0000.nii.gz']
+            else:
+                continue
+            matches = [image for image in candidates if image in names]
+            if len(matches) != 1:
+                raise RuntimeError(f'{source}: expected one image for {name}, found {matches}')
+            case = label.name[:-7]
+            key = f'{source}/{case}.nii.gz'
+            if key in cases:
+                raise RuntimeError(f'Duplicate output: {key}')
+            cases[key] = (source, matches[0])
+            count += 1
+        if count != expected:
+            raise RuntimeError(f'{source}: expected {expected} labelled scans, found {count}')
+    return cases
 
 
-def label_one(job):
-    try:
-        return label_scan(*job)
-    except Exception as error:  # one unreadable scan must not stop the others; it is listed in the manifest
-        return f'ERROR {job[0]}: {error}'
-
-
-def label_scan(image, target, lut):
+def label_scan(job):
+    image, target, lut = job
+    started = time.monotonic()
+    print(f'=== case start: {target.parent.name}/{target.name}; worker={os.getpid()}', flush=True)
+    import torch
     from totalsegmentator.python_api import totalsegmentator
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA unavailable; refusing CPU fallback')
     ct = nib.load(image)
-    seg = totalsegmentator(ct, None, ml=True, task='total', device='gpu', quiet=True, nr_thr_resamp=4, nr_thr_saving=1)
+    if len(ct.shape) != 3:
+        raise RuntimeError(f'{image}: expected a 3D CT')
+    seg = totalsegmentator(ct, None, ml=True, task='total', device='gpu', quiet=True,
+                          nr_thr_resamp=THREADS, nr_thr_saving=1, resampling_order=1)
     values = np.asanyarray(seg.dataobj)
-    if values.shape != ct.shape[:3] or not np.allclose(seg.affine, ct.affine, atol=1e-3):
+    if values.shape != ct.shape[:3] or not np.allclose(seg.affine, ct.affine, rtol=0, atol=1e-3):
         raise RuntimeError(f'{image}: TotalSegmentator output is not on the scan grid')
-    out = nib.Nifti1Image(lut[values.astype(np.int64)], ct.affine)
+    if values.dtype.kind not in 'iu' or values.min() < 0 or values.max() >= len(lut):
+        raise RuntimeError(f'{image}: invalid TotalSegmentator label ids')
+    out = nib.Nifti1Image(lut[values], ct.affine, ct.header.copy())
+    out.set_qform(ct.get_qform(), int(ct.header['qform_code']))
+    out.set_sform(ct.get_sform(), int(ct.header['sform_code']))
     out.set_data_dtype(np.uint8)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.name + '.partial.nii.gz')
     nib.save(out, partial)
-    partial.rename(target)
+    partial.replace(target)
+    print(f'=== case done: {target.parent.name}/{target.name}; {time.monotonic() - started:.1f}s; upload pending', flush=True)
     return target
 
 
-def upload(api, folder):
-    api.upload_large_folder(REPO, folder, repo_type='dataset', allow_patterns=['pseudolabels/*'],
-                            ignore_patterns=['*.partial.nii.gz'])
+def worker_setup(data, gate):
+    from totalsegmentator.config import get_weights_dir, setup_totalseg, set_config_key
+    os.environ['TOTALSEG_WEIGHTS_PATH'] = str(get_weights_dir())
+    # TotalSegmentator updates config.json per scan. Give concurrent workers separate configs.
+    os.environ['TOTALSEG_HOME_DIR'] = str(data / 'worker-config' / str(os.getpid()))
+    setup_totalseg()
+    set_config_key('send_usage_stats', False)
+    set_config_key('statistics_disclaimer_shown', True)
+    setup_runtime(gate)
+
+
+def recipe():
+    from importlib.metadata import distribution, version
+    from totalsegmentator.config import get_weights_dir
+    from totalsegmentator.map_to_binary import class_map
+    weights = get_weights_dir()
+    checkpoints = sorted(weights.rglob('*.pth'))
+    if not checkpoints:
+        raise RuntimeError('Download TotalSegmentator weights first')
+    direct = json.loads(distribution('nnunetv2').read_text('direct_url.json') or '{}')
+    if direct.get('vcs_info', {}).get('commit_id') != NNUNET_COMMIT:
+        raise RuntimeError('nnU-Net is not at the pinned GitHub commit; use startup.sh')
+    return {'sources': SOURCES, 'labels': D998,
+            'label_ids': {'background': 0, **{name: i for i, name in enumerate(D998, 1)}},
+            'source_label_ids': class_map['total'],
+            'merged': MERGED, 'task': 'total', 'fast': False,
+            'resampling': 'SimpleITK array zoom; endpoint-aligned; CT linear; labels nearest',
+            'orientation': 'TotalSegmentator canonicalization and inverse; native input grid',
+            'cpu_threads_per_worker': THREADS, 'gpu_inference_concurrency': 1,
+            'runtime_code': file_info(Path(__file__).with_name('runtime.py'))['sha256'],
+            'nnunet_commit': NNUNET_COMMIT,
+            'versions': {n: version(n) for n in ('TotalSegmentator', 'nnunetv2', 'torch', 'numpy', 'scipy', 'SimpleITK', 'scikit-image')},
+            'code': file_info(Path(__file__))['sha256'],
+            'requirements': file_info(Path(__file__).with_name('requirements.txt'))['sha256'],
+            'weights': {p.relative_to(weights).as_posix(): file_info(p)['sha256']
+                        for p in checkpoints + sorted(weights.rglob('plans.json'))}}
+
+
+def run(data, workers, hub, spec):
+    cases = scans(hub.api)
+    prefix = f"pseudolabels/totalseg-{spec['versions']['TotalSegmentator']}/{digest(spec)[:16]}"
+    manifest_path = f'{prefix}/dataset.json'
+    revision, entries = hub.info()
+    manifest = {'recipe': spec, 'files': {}, 'complete': False, 'scans_total': len(cases)}
+    if manifest_path in entries:
+        manifest = json.loads(hub.get(manifest_path, revision, data / 'manifests').read_text())
+        if digest(manifest['recipe']) != digest(spec) or not set(manifest['files']) <= cases.keys():
+            raise RuntimeError('Incompatible pseudo-label manifest')
+        verify_remote(entries, prefix, manifest)
+    pending = [name for name in cases if name not in manifest['files']]
+    print(f"{len(manifest['files'])}/{len(cases)} verified on Hugging Face; {len(pending)} pending", flush=True)
+    lut = lookup()
+    start = time.monotonic()
+    completed = 0
+    # First case checks the real GPU -> NIfTI -> HF path before spending on a batch.
+    batches = [pending[:1]] + [pending[i:i + UPLOAD_EVERY] for i in range(1, len(pending), UPLOAD_EVERY)]
+    context = multiprocessing.get_context('spawn')
+    gate = context.BoundedSemaphore(1)
+    # Reuse workers across uploads instead of importing the teacher 12 times per batch.
+    with ProcessPoolExecutor(max_workers=workers, mp_context=context,
+                             initializer=worker_setup, initargs=(data, gate)) as pool:
+        for batch in batches:
+            if not batch:
+                continue
+            roots = {}
+            for source in sorted({cases[name][0] for name in batch}):
+                repo, source_revision, _ = SOURCES[source]
+                roots[source] = Path(snapshot_download(repo, repo_type='dataset', revision=source_revision,
+                    allow_patterns=[cases[name][1] for name in batch if cases[name][0] == source],
+                    local_dir=data / 'sources' / source, max_workers=4))
+            jobs = [(safe_path(roots[cases[name][0]], cases[name][1]), safe_path(data / prefix, name), lut) for name in batch]
+            # Executor workers are non-daemon: nnU-Net can create preprocessing/export processes.
+            if workers == 1 or len(batch) == 1:
+                outputs = [label_scan(job) for job in jobs]
+            else:
+                outputs = list(pool.map(label_scan, jobs))
+            manifest['files'].update({name: file_info(path) for name, path in zip(batch, outputs)})
+            manifest['complete'] = set(manifest['files']) == cases.keys()
+            additions = {f'{prefix}/{name}': path for name, path in zip(batch, outputs)}
+            additions[manifest_path] = encoded(manifest)
+            revision = hub.commit(additions, f"Pseudo-labels: {len(manifest['files'])}/{len(cases)}", revision)
+            current_revision, entries = hub.info()
+            verify_remote(entries, prefix, manifest)
+            # Do not overwrite another writer's progress. Restart to reload its manifest.
+            if current_revision != revision:
+                raise RuntimeError('Repository changed during upload; restart to refresh the manifest')
+            completed += len(batch)
+            rate = (time.monotonic() - start) / completed
+            print(f"Uploaded {len(manifest['files'])}/{len(cases)} cases; {rate:.1f} s/case; "
+                  f"{rate * (len(pending) - completed) / 3600:.1f} h left", flush=True)
+    if not manifest['complete'] or set(manifest['files']) != cases.keys():
+        raise RuntimeError('Pseudo-label dataset is incomplete')
+    print(f'=== pseudo-labels complete: https://huggingface.co/datasets/{REPO}/tree/main/{prefix}', flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=Path, required=True)
-    parser.add_argument('--workers', type=int, default=4, help='TotalSegmentator processes sharing the GPU')
+    parser.add_argument('--workers', type=int, default=12, help='Case workers, 4 CPU threads each; one GPU inference at a time')
     args = parser.parse_args()
+    if not 1 <= args.workers <= 12:
+        parser.error('--workers must be between 1 and 12')
+    # Inherited by spawned workers before NumPy/BLAS or nnU-Net are imported.
+    for key in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+                'SITK_THREADS', 'ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS', 'nnUNet_def_n_proc'):
+        os.environ[key] = str(THREADS)
     import torch
-    from importlib.metadata import version
-    prefix = f"pseudolabels/totalseg-{version('TotalSegmentator')}"
-    upload_root = args.data / 'upload'
-    api = HfApi()
-    done = {f for f in api.list_repo_files(REPO, repo_type='dataset') if f.startswith(prefix) and f.endswith('.nii.gz')}
-    lut = lookup()
-    jobs = []
-    for source, case, image in scans(args.data):
-        target = upload_root / prefix / source / f'{case}.nii.gz'
-        if target.relative_to(upload_root).as_posix() not in done and not target.exists():
-            jobs.append((image, target, lut))
-    total = len(jobs) + len(done)
-    print(f'{len(done)} already on Hugging Face, {len(jobs)} to label', flush=True)
-    start, finished, failed = time.time(), 0, []
-    with multiprocessing.get_context('spawn').Pool(args.workers) as pool:
-        for result in pool.imap_unordered(label_one, jobs):
-            finished += 1
-            if isinstance(result, str):
-                failed.append(result)
-                print(result, flush=True)
-            if finished % 5 == 0 or finished == len(jobs):
-                rate = (time.time() - start) / finished
-                print(f'{finished}/{len(jobs)} cases written, {rate:.0f} s per case, '
-                      f'{rate * (len(jobs) - finished) / 3600:.1f} h left', flush=True)
-            if finished % UPLOAD_EVERY == 0:
-                upload(api, upload_root)
-    labelled = sorted(p.relative_to(upload_root / prefix).as_posix() for p in (upload_root / prefix).rglob('*.nii.gz'))
-    manifest = {'labels': {'background': 0, **{n: i for i, n in enumerate(D998, 1)}}, 'merged_into_kidney': MERGED,
-                'totalsegmentator': version('TotalSegmentator'), 'nnunetv2': version('nnunetv2'), 'torch': torch.__version__,
-                'gpu': torch.cuda.get_device_name(0), 'python': platform.python_version(), 'task': 'total', 'fast': False,
-                'sources': {s: {'repo': r, 'revision': rev} for s, (r, rev, _) in SOURCES.items()},
-                'scans_labelled_on_this_machine': labelled, 'failed_on_this_machine': failed, 'scans_total': total}
-    (upload_root / prefix / 'dataset.json').write_text(json.dumps(manifest, indent=1))
-    upload(api, upload_root)
-    print(f'=== pseudo-labels complete: https://huggingface.co/datasets/{REPO}/tree/main/{prefix}', flush=True)
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA unavailable; refusing CPU fallback')
+    print(f'GPU: {torch.cuda.get_device_name(0)}; workers: {args.workers}', flush=True)
+    spec = recipe()
+    worker_setup(args.data, multiprocessing.get_context('spawn').BoundedSemaphore(1))
+    # Public pseudo-label output is explicitly authorized; later privatization is OK.
+    run(args.data, args.workers, Hub(REPO, 'dataset', allow_public=True), spec)
 
 
 if __name__ == '__main__':

@@ -1,3 +1,5 @@
 results/
 test-results/
 __pycache__/
+.pseudolabel-monitor.json
+.pseudolabel-monitor.json.tmp
