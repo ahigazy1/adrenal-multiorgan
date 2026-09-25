@@ -132,7 +132,9 @@ def worker_setup(data, gate):
     from totalsegmentator.config import get_weights_dir, setup_totalseg, set_config_key
     os.environ['TOTALSEG_WEIGHTS_PATH'] = str(get_weights_dir())
     # TotalSegmentator updates config.json per scan. Give concurrent workers separate configs.
-    os.environ['TOTALSEG_HOME_DIR'] = str(data / 'worker-config' / str(os.getpid()))
+    home = data / 'worker-config' / str(os.getpid())
+    home.parent.mkdir(parents=True, exist_ok=True)   # setup_totalseg creates only the last level
+    os.environ['TOTALSEG_HOME_DIR'] = str(home)
     setup_totalseg()
     set_config_key('send_usage_stats', False)
     set_config_key('statistics_disclaimer_shown', True)
