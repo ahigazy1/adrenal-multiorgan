@@ -1,6 +1,6 @@
 # AGENTS.md: picking up this project
 
-Read this first. It is the operational state as of **2026-09-26 02:25 UTC**, written so another agent (or person) can continue without the chat history. When anything here disagrees with live state, live state wins: re-check before acting.
+Read this first. It records the project handoff and **cleanup verified 2026-09-26 03:07 UTC**, written so another agent (or person) can continue without the chat history. When anything here disagrees with live state, live state wins: re-check before acting.
 
 ## Ground rules from the user
 
@@ -56,7 +56,7 @@ Read this first. It is the operational state as of **2026-09-26 02:25 UTC**, wri
   - **Split:** Dataset902's test and validation sets, unchanged.
   - **Provenance:** writes `provenance.csv` and `provenance.json`.
 - **`trainers/d997_finetune.py`, `ADRENAL_RUN=d997 python train.py`, and `gcp/finetune_startup.sh`.**
-- **Partial build to delete first:** a build was started and then killed. `/opt/adrenal-multiorgan/data/nnUNet_raw/Dataset903_D997Finetune` holds 189 partial label files and no finished marker. Delete that folder before any rebuild.
+- **Partial build removed:** the killed build at `/opt/adrenal-multiorgan/data/nnUNet_raw/Dataset903_D997Finetune` was verified to have no finished marker and deleted during user-requested cleanup on 2026-09-26. A new build is still paused pending design agreement.
 
 **Must fix before building** (from the code review; details in the handoff folder's DESTINATION_STATE.md):
 1. Clear `Dataset903` at build start, and put the git SHA in its finished marker.
@@ -91,7 +91,7 @@ Read this first. It is the operational state as of **2026-09-26 02:25 UTC**, wri
 ## Google Cloud and the VM
 
 - **gcloud account** `zakiyaferdousi@gmail.com`, **project** `adrenal-seg`. HF token: Secret Manager secret `HF_TOKEN`, readable by the account and by the VM's service account. **Never print it or save it to disk.**
-- **VM `adrenal-train`**, us-central1-f: g4-standard-48 Spot (RTX PRO 6000, 96 GB), 500 GB disk (about 179 GB free). **It is RUNNING and billing.** Only us-central1-f works (the disk is zonal); if Spot capacity is short, retrying later works.
+- **VM `adrenal-train`**, us-central1-f: g4-standard-48 Spot (RTX PRO 6000, 96 GB), 500 GB disk (204 GiB free after cleanup). **It is RUNNING and billing at the last check.** Only us-central1-f works (the disk is zonal); if Spot capacity is short, retrying later works.
 - **Why nothing else can be created:** the project's Hyperdisk quota is 500 GB, all used by this disk, and increase requests were auto-denied. No second VM is possible.
 - **Current VM state, which matters:**
   - **Startup script:** the startup-script metadata is the **pseudo-label** script, not the training one. Before training, restore it: [../../ops/pseudo-on-adrenal-train/README.md](../../ops/pseudo-on-adrenal-train/README.md) in the handoff folder, `original-training-startup.sh`. Or set `gcp/finetune_startup.sh` with metadata `finetune-revision=<full 40-character sha>`.
@@ -106,7 +106,17 @@ Read this first. It is the operational state as of **2026-09-26 02:25 UTC**, wri
 | `/opt/flare-run` | FLARE comparison checkout; its pixi environment has `psutil` added via uv |
 | `/opt/finetune-run` | Fine-tune checkout at `8920e4a`, pixi environment |
 | `/opt/vista` | VISTA3D environment (uv; torch cu128, monai 1.4.0, pytorch-ignite), bundle, `in/` symlinks, `out/` |
-| `/opt/atlas-check` | 18 extracted AbdomenAtlas scans, safe to delete |
+| `/opt/atlas-check` | Removed during 2026-09-26 cleanup: 18 disposable extracted AbdomenAtlas scans |
+
+### Cleanup completed 2026-09-26
+
+At the user's request, after checking that no training or inference jobs were active:
+- Removed the incomplete Dataset903 raw build and the disposable `/opt/atlas-check` scans.
+- SHA-256 verified all 380 CT files under `/opt/pseudo/sources` against the retained originals under `/opt/adrenal-multiorgan/data`. All matched. Replaced the duplicate files with symlinks to those originals; verified the links resolve. Keep their targets in place while using these pseudo-label source paths.
+- Recovered 26,026,690,945 file bytes (about 24.2 GiB); `df` free space increased from 179 to 204 GiB.
+- Preserved predictions, checkpoints, environments and logs. Startup metadata and the shutdown placeholder were unchanged.
+- VM cleanup log: `/var/log/adrenal-cleanup-20260926.json`. Local copy in the handoff folder: `verification/takeover-evidence/vm-cleanup-log.txt`.
+- Local cleanup removed 14 generated project Python bytecode files (275 KB). The handoff's source, history, evidence and check environment were retained.
 
 ### Running commands on the VM from this Windows computer (Git Bash)
 
