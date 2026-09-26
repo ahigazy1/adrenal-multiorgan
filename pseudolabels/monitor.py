@@ -221,7 +221,7 @@ def render(snapshot):
             print('  ' + line)
         if vm.get('status') in ('TERMINATED', 'STOPPED') and hf['state'] != 'COMPLETE':
             print('VM is stopped and verified completion is absent; inspect its final log before resuming.')
-    print('Uploads advance after the first case, then batches of 25. Case-done logs are not verified uploads.', flush=True)
+    print('Uploads advance after the first case, then batches of 48. Case-done logs are not verified uploads.', flush=True)
 
 
 def main():

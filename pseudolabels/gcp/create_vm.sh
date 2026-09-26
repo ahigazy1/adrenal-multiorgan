@@ -11,8 +11,8 @@
 # Same machine as training: g4-standard-48 (RTX PRO 6000 96 GB, 48 vCPUs), Spot, Ubuntu Pro with the NVIDIA driver.
 set -euo pipefail
 NAME=adrenal-pseudo
-PSEUDO_WORKERS=${PSEUDO_WORKERS:-12}
-[[ "$PSEUDO_WORKERS" =~ ^([1-9]|1[0-2])$ ]] || { echo "PSEUDO_WORKERS must be between 1 and 12"; exit 1; }
+PSEUDO_WORKERS=${PSEUDO_WORKERS:-24}
+[[ "$PSEUDO_WORKERS" =~ ^([1-9]|[12][0-9]|3[0-2])$ ]] || { echo "PSEUDO_WORKERS must be between 1 and 32"; exit 1; }
 DISK_GB=200          # sources about 60 GB, pseudo-labels a few GB
 DISK_IOPS=10000      # disk speed as in our test runs; it is a large part of the disk's price
 DISK_MB_PER_S=1050

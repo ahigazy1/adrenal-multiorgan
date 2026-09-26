@@ -51,6 +51,6 @@ export HF_TOKEN
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 totalseg_download_weights -t total   # once, before the workers start, so they do not all download at the same time
 python adrenal-multiorgan/pseudolabels/check_pseudolabel.py
-WORKERS=$(metadata instance/attributes/pseudo-workers || echo 12)
+WORKERS=$(metadata instance/attributes/pseudo-workers || echo 24)
 python adrenal-multiorgan/pseudolabels/pseudolabel.py --data /opt/pseudo --workers "$WORKERS"
 echo "=== all done $(date -u)"

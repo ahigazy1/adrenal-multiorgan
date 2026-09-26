@@ -6,7 +6,7 @@ from functools import wraps
 
 import numpy as np
 
-THREADS = 4
+THREADS = 2
 
 
 def resample_img(img, zoom=0.5, order=0, nr_cpus=THREADS):

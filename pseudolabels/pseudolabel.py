@@ -7,7 +7,7 @@ TotalSegmentator class is 0, kidney cysts are merged into their kidney. Nothing 
 labels (real labels win, pseudo-labels become the ignore label) is a later step.
 
 Files go to the private dataset ahigazy1/adrenal-multiorgan-cache under
-pseudolabels/totalseg-<version>/<recipe>/<source>/<case>.nii.gz. The first scan, then batches of 25,
+pseudolabels/totalseg-<version>/<recipe>/<source>/<case>.nii.gz. The first scan, then batches of 48,
 are committed with a checksum manifest. Only verified remote results are skipped on resume.
 """
 import argparse
@@ -28,8 +28,7 @@ from hf_cache import Hub, digest, encoded, file_info, safe_path, verify_remote
 from runtime import THREADS, setup as setup_runtime
 
 REPO = 'ahigazy1/adrenal-pseudolabels'
-UPLOAD_EVERY = 25
-GPU_CONCURRENCY = 4   # nnU-Net invocations at once; each uses a few GB of the 96 GB GPU
+UPLOAD_EVERY = 48   # two waves of 24 workers per upload; a batch waits for its slowest scan
 NNUNET_COMMIT = '940dcd3ba8e9f9a1c21885ca52acd2f06328b6fc'
 # Sources at pinned revisions (the same as ../prepare.sh), downloaded one after the other (parallel gets HTTP 429).
 SOURCES = {
@@ -162,7 +161,7 @@ def recipe():
             'merged': MERGED, 'task': 'total', 'fast': False,
             'resampling': 'SimpleITK array zoom; endpoint-aligned; CT linear; labels nearest',
             'orientation': 'TotalSegmentator canonicalization and inverse; native input grid',
-            'cpu_threads_per_worker': THREADS, 'gpu_inference_concurrency': GPU_CONCURRENCY,
+            'cpu_threads_per_worker': THREADS, 'gpu_inference_concurrency': 'one per worker',
             'roi_subset': ROI_SUBSET,
             'runtime_code': file_info(Path(__file__).with_name('runtime.py'))['sha256'],
             'nnunet_commit': NNUNET_COMMIT,
@@ -192,7 +191,8 @@ def run(data, workers, hub, spec):
     # First case checks the real GPU -> NIfTI -> HF path before spending on a batch.
     batches = [pending[:1]] + [pending[i:i + UPLOAD_EVERY] for i in range(1, len(pending), UPLOAD_EVERY)]
     context = multiprocessing.get_context('spawn')
-    gate = context.BoundedSemaphore(GPU_CONCURRENCY)
+    # Per-scan nnU-Net work is mostly single-threaded CPU; limiting it below the worker count idled the machine.
+    gate = context.BoundedSemaphore(workers)
     # Reuse workers across uploads instead of importing the teacher 12 times per batch.
     with ProcessPoolExecutor(max_workers=workers, mp_context=context,
                              initializer=worker_setup, initargs=(data, gate)) as pool:
@@ -233,10 +233,10 @@ def run(data, workers, hub, spec):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=Path, required=True)
-    parser.add_argument('--workers', type=int, default=12, help='Case workers, 4 CPU threads each; one GPU inference at a time')
+    parser.add_argument('--workers', type=int, default=24, help='Case workers, 2 CPU threads each, each with its own GPU slot')
     args = parser.parse_args()
-    if not 1 <= args.workers <= 12:
-        parser.error('--workers must be between 1 and 12')
+    if not 1 <= args.workers <= 32:
+        parser.error('--workers must be between 1 and 32')
     # Inherited by spawned workers before NumPy/BLAS or nnU-Net are imported.
     for key in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
                 'SITK_THREADS', 'ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS', 'nnUNet_def_n_proc'):
