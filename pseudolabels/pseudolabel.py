@@ -29,6 +29,7 @@ from runtime import THREADS, setup as setup_runtime
 
 REPO = 'ahigazy1/adrenal-pseudolabels'
 UPLOAD_EVERY = 25
+GPU_CONCURRENCY = 4   # nnU-Net invocations at once; each uses a few GB of the 96 GB GPU
 NNUNET_COMMIT = '940dcd3ba8e9f9a1c21885ca52acd2f06328b6fc'
 # Sources at pinned revisions (the same as ../prepare.sh), downloaded one after the other (parallel gets HTTP 429).
 SOURCES = {
@@ -49,6 +50,8 @@ D998 = ['spleen', 'kidney_right', 'kidney_left', 'gallbladder', 'liver', 'stomac
         'inferior_vena_cava', 'portal_vein_and_splenic_vein', 'iliac_artery_left', 'iliac_artery_right',
         'iliac_vena_left', 'iliac_vena_right']
 MERGED = {'kidney_cyst_left': 'kidney_left', 'kidney_cyst_right': 'kidney_right'}
+# TS then runs only the organ, vertebra and cardiac models (not ribs/muscles), after its 6 mm crop model (task 298).
+ROI_SUBSET = D998 + list(MERGED)
 
 
 def lookup():
@@ -110,7 +113,7 @@ def label_scan(job):
     if len(ct.shape) != 3:
         raise RuntimeError(f'{image}: expected a 3D CT')
     seg = totalsegmentator(ct, None, ml=True, task='total', device='gpu', quiet=True,
-                          nr_thr_resamp=THREADS, nr_thr_saving=1, resampling_order=1)
+                          nr_thr_resamp=THREADS, nr_thr_saving=1, resampling_order=1, roi_subset=ROI_SUBSET)
     values = np.asanyarray(seg.dataobj)
     if values.shape != ct.shape[:3] or not np.allclose(seg.affine, ct.affine, rtol=0, atol=1e-3):
         raise RuntimeError(f'{image}: TotalSegmentator output is not on the scan grid')
@@ -159,7 +162,8 @@ def recipe():
             'merged': MERGED, 'task': 'total', 'fast': False,
             'resampling': 'SimpleITK array zoom; endpoint-aligned; CT linear; labels nearest',
             'orientation': 'TotalSegmentator canonicalization and inverse; native input grid',
-            'cpu_threads_per_worker': THREADS, 'gpu_inference_concurrency': 1,
+            'cpu_threads_per_worker': THREADS, 'gpu_inference_concurrency': GPU_CONCURRENCY,
+            'roi_subset': ROI_SUBSET,
             'runtime_code': file_info(Path(__file__).with_name('runtime.py'))['sha256'],
             'nnunet_commit': NNUNET_COMMIT,
             'versions': {n: version(n) for n in ('TotalSegmentator', 'nnunetv2', 'torch', 'numpy', 'scipy', 'SimpleITK', 'scikit-image')},
@@ -188,7 +192,7 @@ def run(data, workers, hub, spec):
     # First case checks the real GPU -> NIfTI -> HF path before spending on a batch.
     batches = [pending[:1]] + [pending[i:i + UPLOAD_EVERY] for i in range(1, len(pending), UPLOAD_EVERY)]
     context = multiprocessing.get_context('spawn')
-    gate = context.BoundedSemaphore(1)
+    gate = context.BoundedSemaphore(GPU_CONCURRENCY)
     # Reuse workers across uploads instead of importing the teacher 12 times per batch.
     with ProcessPoolExecutor(max_workers=workers, mp_context=context,
                              initializer=worker_setup, initargs=(data, gate)) as pool:
@@ -241,8 +245,10 @@ def main():
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA unavailable; refusing CPU fallback')
     print(f'GPU: {torch.cuda.get_device_name(0)}; workers: {args.workers}', flush=True)
-    spec = recipe()
     worker_setup(args.data, multiprocessing.get_context('spawn').BoundedSemaphore(1))
+    from totalsegmentator.libs import download_pretrained_weights
+    download_pretrained_weights(298)   # roi_subset crop model: fetch once, not in 12 racing workers
+    spec = recipe()
     # Public pseudo-label output is explicitly authorized; later privatization is OK.
     run(args.data, args.workers, Hub(REPO, 'dataset', allow_public=True), spec)
 

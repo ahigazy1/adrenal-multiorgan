@@ -156,6 +156,7 @@ def check():
             assert lut[source_id] == p.D998.index(p.MERGED.get(name, name)) + 1
     assert sum(source[2] for source in p.SOURCES.values()) == 380
     assert set(p.SOURCES) == {'amos', 'btcv', 'flare'}
+    assert set(p.ROI_SUBSET) == set(p.D998) | set(p.MERGED) and len(p.ROI_SUBSET) == 68
 
     # Nested process counts are capped and the GPU gate releases on failure.
     gate = multiprocessing.get_context('spawn').BoundedSemaphore(1)
