@@ -83,3 +83,16 @@ The abandoned Dataset903 build was removed during approved cleanup on September 
 Approved cleanup removed the abandoned Dataset903 build and disposable `/opt/atlas-check` scans; replaced 380 checksum-identical duplicate CTs with symlinks to retained originals, reclaiming ~24.2 GiB. Preserve their targets. Log `/var/log/adrenal-cleanup-20260926.json`; handoff copy `verification/takeover-evidence/vm-cleanup-log.txt`.
 
 HF storage was near its limit at the last audit, mostly checkpoint history. No squashing/deletion is approved. Use raw API `usedStorage` for new audits; old usage snapshots are not current quotas.
+
+## VM disk archive (2026-09-26)
+
+Everything that existed only on the `adrenal-train` disk was uploaded to HF `ahigazy1/adrenal-multiorgan-model` under `vm-archive-2026-09-26/` (384 files, 79 MB, all verified by recursive listing). It contains:
+- the Dataset902 final-checkpoint test predictions
+- all run logs
+- the full-TotalSegmentator AMOS outputs
+- the CTMR and NV-CT teacher trials
+- the ad hoc job scripts
+
+Everything else on that disk was already on HF (the Dataset902 cache, the model folder, VISTA3D for 380 + 413 RAOS scans, AtlasNet fine-tune on TotalSegmentator under `comparison-totalseg/`), public, or reproducible.
+
+**HF listing gotcha:** on repos this large, `repo_info(...).siblings` returns a truncated list. Use `list_repo_tree(recursive=True)` to verify files.
