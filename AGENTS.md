@@ -77,10 +77,15 @@ Read this first. It is the operational state as of **2026-09-26 02:25 UTC**, wri
 
 ## In progress when this was written
 
-- **VISTA3D pseudo-labels** for the 380 scans (`pseudolabels/vista3d/run.sh`): outputs in `/opt/vista/out/<shard>/<case>/<case>_trans.nii.gz`, raw VISTA3D label IDs. It was at 291 of 380. Logs: `/var/log/vista3d.log` and `/var/log/vista3d-{0..3}.log`. The PyTorch 2.9+ indexing warning is harmless: outputs were checked against FLARE labels.
-- **Teacher comparison** (`pseudolabels/vista3d/compare_teachers.py`): a local background loop starts it automatically when VISTA3D finishes. It writes `/opt/pseudo/evaluation/teachers_vs_ground_truth.csv` and prints a per-organ table. **If the loop died, run it by hand:**
-  copy `pseudolabels/vista3d/compare_teachers.py` to the VM as `/tmp/compare_teachers.py` (base64 pattern below), then `sudo /opt/pseudo-env/bin/python /tmp/compare_teachers.py`. It reads `/opt/vista/bundle/docs/labels.json`.
-  VISTA3D was trained on AMOS and TotalSegmentator, so compare the teachers mainly on FLARE22.
+- **VISTA3D pseudo-labels: done** for all 380 scans (`pseudolabels/vista3d/run.sh`). Outputs are in `/opt/vista/out/<shard>/<case>/<case>_trans.nii.gz` on the VM, with raw VISTA3D label IDs; `compare_teachers.py` maps them to D997's classes. They're **not uploaded to HF yet**. The PyTorch 2.9+ indexing warning is harmless.
+- **Teacher comparison: done.** `/opt/pseudo/evaluation/teachers_vs_ground_truth.csv` on the VM (not uploaded). Mean Dice, TotalSegmentator / VISTA3D, against each source's labels:
+  - Adrenals: AMOS 0.70/0.75 (left), 0.69/0.74 (right); BTCV 0.69/0.72, 0.72/0.72; FLARE22 0.84/0.84, 0.83/0.83.
+  - Pancreas: AMOS 0.81/0.84, BTCV 0.81/0.84, FLARE22 0.83/0.89.
+  - Duodenum: AMOS 0.69/0.76, FLARE22 0.77/0.82.
+  - Gallbladder: AMOS 0.79/0.83, BTCV 0.70/0.80, FLARE22 0.89/0.91.
+  - Large organs: within ±0.015.
+
+  **Caveat:** VISTA3D's training data includes AMOS22 (64% of its scans) and TotalSegmentator, and possibly FLARE through AbdomenCT-1K. So its AMOS advantage is inflated. FLARE22 is the fairest comparison: there the adrenals are tied, and VISTA3D is clearly better on pancreas, duodenum and gallbladder.
 - **RAOS:** downloaded to `/opt/adrenal-multiorgan/data/raos-source/RAOS-Real` (826 files: 413 scans plus labels), AdrenalSeg-Sources @ `873ffe7a`. There are no pseudo-labels for RAOS yet: it needs TotalSegmentator (add a `raos` source to `pseudolabels/pseudolabel.py`; its old RAOS layout code is in commit `29c4003`) and VISTA3D (link the RAOS images into a new input folder).
 
 ## Google Cloud and the VM
