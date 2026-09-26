@@ -152,7 +152,8 @@ def recipe():
     direct = json.loads(distribution('nnunetv2').read_text('direct_url.json') or '{}')
     if direct.get('vcs_info', {}).get('commit_id') != NNUNET_COMMIT:
         raise RuntimeError('nnU-Net is not at the pinned GitHub commit; use startup.sh')
-    return {'sources': SOURCES, 'labels': D998,
+    # JSON-normalize (int label keys become strings) so the digest matches the manifest read back for resume.
+    return json.loads(encoded({'sources': SOURCES, 'labels': D998,
             'label_ids': {'background': 0, **{name: i for i, name in enumerate(D998, 1)}},
             'source_label_ids': class_map['total'],
             'merged': MERGED, 'task': 'total', 'fast': False,
@@ -165,7 +166,7 @@ def recipe():
             'code': file_info(Path(__file__))['sha256'],
             'requirements': file_info(Path(__file__).with_name('requirements.txt'))['sha256'],
             'weights': {p.relative_to(weights).as_posix(): file_info(p)['sha256']
-                        for p in checkpoints + sorted(weights.rglob('plans.json'))}}
+                        for p in checkpoints + sorted(weights.rglob('plans.json'))}}))
 
 
 def run(data, workers, hub, spec):
