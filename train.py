@@ -5,7 +5,7 @@
 A local checkpoint is preferred. On a fresh disk, a complete, checksum-verified
 Hugging Face snapshot is restored before continuing with nnU-Net's checkpoint
 loader (network, optimizer, scaler and epoch), not its pretrained-weights loader.
-Without a saved run, training starts from the pinned AtlasNet weights.
+Without a saved run, training starts from the pinned AtlasNet weights (ADRENAL_RUN=d997: D997's, see finetune.py).
 
 Every 100 epochs the trainer uploads an atomic snapshot. A resume can recover
 only the last successfully uploaded checkpoint, not later work on a deleted disk.
@@ -20,14 +20,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('ADRENAL_DATA', ROOT / 'data'))
-DATASET = 'Dataset902_AdrenalMultiorgan'
-PLANS = 'AtlasNetPlans'
+RUN = os.environ.get('ADRENAL_RUN', 'atlasnet')  # 'd997': the D997 fine-tune on Dataset903 (finetune.py)
 CONFIGURATION = '3d_fullres'
 FOLD = 0
 SEED = 42
-TRAINER = 'AdrenalMultiorgan'
-ATLASNET_WEIGHTS = DATA / 'atlas/checkpoint_final.pth'
-ATLASNET_SHA256 = '73ff6cb8e09bbe0c7ad5097d10c281ef4a757c7740ef00b15ee683e907b3e37e'
+if RUN == 'd997':
+    DATASET, PLANS, TRAINER = 'Dataset903_D997Finetune', 'D997Plans', 'D997Finetune'
+    WEIGHTS, WEIGHTS_SHA256 = DATA / 'd997/labmate/fold_0/checkpoint_final.pth', \
+        '0840b5b15364daa194033cef1466b522316c440cc190c80fdf7091dca02c17f7'
+    TRAINER_FILES = ('trainers/adrenal_multiorgan.py', 'trainers/d997_finetune.py')
+else:
+    DATASET, PLANS, TRAINER = 'Dataset902_AdrenalMultiorgan', 'AtlasNetPlans', 'AdrenalMultiorgan'
+    WEIGHTS, WEIGHTS_SHA256 = DATA / 'atlas/checkpoint_final.pth', \
+        '73ff6cb8e09bbe0c7ad5097d10c281ef4a757c7740ef00b15ee683e907b3e37e'
+    TRAINER_FILES = ('trainers/adrenal_multiorgan.py',)
 
 os.environ.setdefault('ADRENAL_HF_REPO', 'ahigazy1/adrenal-multiorgan-model')
 os.environ['nnUNet_raw'] = str(DATA / 'nnUNet_raw')
@@ -62,15 +68,25 @@ def fetch_model_from_hugging_face():
 def run_record():
     """Fingerprint of everything that must stay fixed for the same experiment."""
     preprocessed = DATA / 'nnUNet_preprocessed' / DATASET
-    record = {'trainer': sha256(ROOT / 'trainers/adrenal_multiorgan.py'), 'plans': sha256(preprocessed / f'{PLANS}.json'),
-              'split': sha256(preprocessed / 'splits_final.json'), 'atlasnet_weights': ATLASNET_SHA256,
+    trainer = [sha256(ROOT / name) for name in TRAINER_FILES]
+    record = {'trainer': trainer[0] if RUN == 'atlasnet' else trainer, 'plans': sha256(preprocessed / f'{PLANS}.json'),
+              'split': sha256(preprocessed / 'splits_final.json'),
+              'atlasnet_weights' if RUN == 'atlasnet' else 'pretrained_weights': WEIGHTS_SHA256,
               'dataset': DATASET, 'fold': FOLD, 'seed': SEED}
-    marker = DATA / '.prepared'
-    if marker.is_file() and marker.stat().st_size:
+    marker = DATA / '.prepared'  # the Dataset902 preprocessing cache only
+    if RUN == 'atlasnet' and marker.is_file() and marker.stat().st_size:
         from hf_cache import check_manifest
         value = check_manifest(json.loads(marker.read_text()), 'preprocessed')
         record['preprocessed_content_id'] = value['content_id']
     return record
+
+
+def load_all_weights(network, fname, verbose=False):
+    """Every weight, output layers included; strict, so any architecture or class-count mismatch stops the run."""
+    import torch
+    module = getattr(network, '_orig_mod', network)  # torch.compile wraps the network
+    module.load_state_dict(torch.load(fname, map_location='cpu', weights_only=False)['network_weights'])
+    log.info('Loaded all weights, output layers included, from %s', fname)
 
 
 def main():
@@ -98,13 +114,16 @@ def main():
         log.info('Continuing from the checkpoint in %s', FOLD_FOLDER)
         weights = None
     else:
-        if sha256(ATLASNET_WEIGHTS) != ATLASNET_SHA256:
-            raise SystemExit(f'{ATLASNET_WEIGHTS} is not the expected AtlasNet checkpoint')
-        log.info('Starting a new run from the AtlasNet weights')
+        if sha256(WEIGHTS) != WEIGHTS_SHA256:
+            raise SystemExit(f'{WEIGHTS} is not the expected {RUN} checkpoint')
+        log.info('Starting a new run from the %s weights', RUN)
         FOLD_FOLDER.mkdir(parents=True, exist_ok=True)
         from hf_cache import write_json
         write_json(record_path, run_record())
-        weights = str(ATLASNET_WEIGHTS)
+        weights = str(WEIGHTS)
+        if RUN == 'd997':  # same 66 classes: keep D997's output layers too, which nnU-Net's loader re-initialises
+            import nnunetv2.run.run_training as run_module
+            run_module.load_pretrained_weights = load_all_weights
 
     random.seed(SEED)
     np.random.seed(SEED)
