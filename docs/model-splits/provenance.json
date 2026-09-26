@@ -36,6 +36,14 @@
     "related-older-model-split-excerpt.txt": {
       "source": "C:\\Users\\ahiga\\Downloads\\AdrenalGlandVolume-main (4)\\AdrenalGlandVolume-main\\training_log_2025_3_14_19_38_27.txt",
       "sha256": "e8378b6a4a0359cd82490244dd341dc3ac61bd38a02f68a353984f8dbb3b5ae7"
+    },
+    "D998-dataset_fingerprint.json": {
+      "source": "hf://datasets/ahigazy1/AdrenalSeg-Sources@873ffe7a905092f81716f0bcc8453fe14f4a022d/Dataset998_TotalSeg66classes/nnUNetTrainer_2000epochs_NoMirroring__nnUNetResEncLPlans_16GB__3d_fullres_bs8/dataset_fingerprint.json",
+      "sha256": "31e2db334591b7cbe4a28f8b5000c025e526e8f377fa0cc6b5e0ae765820d430"
+    },
+    "totalsegmentator-v201-ct-shapes.json": {
+      "source": "NIfTI header shape and zooms of every <case>/ct.nii.gz in Totalsegmentator_dataset_v201.zip (md5 fe250e5718e0a3b5df4c4ea9d58a62fe, from ahigazy1/adrenal-multiorgan-cache), read on adrenal-train 2026-09-26",
+      "sha256": "7199cc224707d50504bfbcbcf59c30560791b35b258159b2cc1aa2d8481f66f7"
     }
   },
   "local_checkpoint_sha256_recomputed": {

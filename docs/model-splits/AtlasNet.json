@@ -1,0 +1,1031 @@
+{
+  "model": "AtlasNet",
+  "weights": "AbdomenAtlas/AtlasNet fd03b410350096da9bc743cd77f937aaffc11fcf (AbdomenAtlasNetOrgans.zip, checkpoint sha256 73ff6cb8...)",
+  "training_data": "All of AbdomenAtlas 3.0 (9,262 CTs), per the model README at fd03b410; no held-out split",
+  "method": "Exact sorted shape + spacing of our CT headers against AbdomenAtlas3.0MiniWithMeta.csv, then voxel confirmation of every match in one image archive (BDMAP_00004409-00004640): all 16 AMOS/BTCV/FLARE matches are the same scan (body-cropped in-plane, 3D correlation 1.00000, median |diff| 0-1 HU); both TotalSegmentator matches were coincidences (correlation 0.29 / different geometry), so TotalSegmentator is not assessed.",
+  "counts": {
+    "amos": 200,
+    "btcv": 28,
+    "flare": 46,
+    "of_labelled": {
+      "amos": 300,
+      "btcv": 30,
+      "flare": 50
+    }
+  },
+  "comparison_matched75_in_training": [
+    "FLARE22_Tr_0007",
+    "FLARE22_Tr_0009",
+    "FLARE22_Tr_0011",
+    "FLARE22_Tr_0015",
+    "FLARE22_Tr_0017",
+    "FLARE22_Tr_0036",
+    "FLARE22_Tr_0040",
+    "FLARE22_Tr_0044",
+    "FLARE22_Tr_0050",
+    "amos_0006",
+    "amos_0016",
+    "amos_0017",
+    "amos_0021",
+    "amos_0027",
+    "amos_0030",
+    "amos_0042",
+    "amos_0045",
+    "amos_0047",
+    "amos_0088",
+    "amos_0097",
+    "amos_0109",
+    "amos_0124",
+    "amos_0129",
+    "amos_0133",
+    "amos_0141",
+    "amos_0153",
+    "amos_0161",
+    "amos_0171",
+    "amos_0177",
+    "amos_0181",
+    "amos_0215",
+    "amos_0242",
+    "amos_0268",
+    "amos_0272",
+    "amos_0282",
+    "amos_0299",
+    "amos_0321",
+    "amos_0337",
+    "amos_0341",
+    "amos_0353",
+    "amos_0361",
+    "amos_0366",
+    "amos_0370",
+    "amos_0396",
+    "amos_0402",
+    "amos_0405",
+    "btcv_label0005",
+    "btcv_label0021",
+    "btcv_label0028",
+    "btcv_label0029",
+    "btcv_label0030",
+    "btcv_label0038"
+  ],
+  "members": {
+    "FLARE22_Tr_0002": [
+      "BDMAP_00001584"
+    ],
+    "FLARE22_Tr_0003": [
+      "BDMAP_00003114"
+    ],
+    "FLARE22_Tr_0004": [
+      "BDMAP_00003367"
+    ],
+    "FLARE22_Tr_0005": [
+      "BDMAP_00000683"
+    ],
+    "FLARE22_Tr_0006": [
+      "BDMAP_00001590",
+      "BDMAP_00005074"
+    ],
+    "FLARE22_Tr_0007": [
+      "BDMAP_00003961"
+    ],
+    "FLARE22_Tr_0008": [
+      "BDMAP_00001628"
+    ],
+    "FLARE22_Tr_0009": [
+      "BDMAP_00003771"
+    ],
+    "FLARE22_Tr_0010": [
+      "BDMAP_00003277"
+    ],
+    "FLARE22_Tr_0011": [
+      "BDMAP_00004880"
+    ],
+    "FLARE22_Tr_0012": [
+      "BDMAP_00003900"
+    ],
+    "FLARE22_Tr_0013": [
+      "BDMAP_00003551",
+      "BDMAP_00004129"
+    ],
+    "FLARE22_Tr_0014": [
+      "BDMAP_00000338"
+    ],
+    "FLARE22_Tr_0015": [
+      "BDMAP_00003853"
+    ],
+    "FLARE22_Tr_0016": [
+      "BDMAP_00002171"
+    ],
+    "FLARE22_Tr_0017": [
+      "BDMAP_00000438"
+    ],
+    "FLARE22_Tr_0018": [
+      "BDMAP_00002298"
+    ],
+    "FLARE22_Tr_0019": [
+      "BDMAP_00003329",
+      "BDMAP_00004415"
+    ],
+    "FLARE22_Tr_0020": [
+      "BDMAP_00004651"
+    ],
+    "FLARE22_Tr_0021": [
+      "BDMAP_00000332"
+    ],
+    "FLARE22_Tr_0023": [
+      "BDMAP_00004549"
+    ],
+    "FLARE22_Tr_0024": [
+      "BDMAP_00001618"
+    ],
+    "FLARE22_Tr_0025": [
+      "BDMAP_00001649"
+    ],
+    "FLARE22_Tr_0026": [
+      "BDMAP_00002216"
+    ],
+    "FLARE22_Tr_0027": [
+      "BDMAP_00001597"
+    ],
+    "FLARE22_Tr_0028": [
+      "BDMAP_00002227"
+    ],
+    "FLARE22_Tr_0029": [
+      "BDMAP_00002896"
+    ],
+    "FLARE22_Tr_0030": [
+      "BDMAP_00000243"
+    ],
+    "FLARE22_Tr_0031": [
+      "BDMAP_00004954"
+    ],
+    "FLARE22_Tr_0032": [
+      "BDMAP_00002688"
+    ],
+    "FLARE22_Tr_0033": [
+      "BDMAP_00003525"
+    ],
+    "FLARE22_Tr_0035": [
+      "BDMAP_00000299",
+      "BDMAP_00000618",
+      "BDMAP_00003593"
+    ],
+    "FLARE22_Tr_0036": [
+      "BDMAP_00000676"
+    ],
+    "FLARE22_Tr_0038": [
+      "BDMAP_00001668",
+      "BDMAP_00005063"
+    ],
+    "FLARE22_Tr_0039": [
+      "BDMAP_00005108"
+    ],
+    "FLARE22_Tr_0040": [
+      "BDMAP_00002829"
+    ],
+    "FLARE22_Tr_0041": [
+      "BDMAP_00003385"
+    ],
+    "FLARE22_Tr_0042": [
+      "BDMAP_00004636"
+    ],
+    "FLARE22_Tr_0043": [
+      "BDMAP_00004550"
+    ],
+    "FLARE22_Tr_0044": [
+      "BDMAP_00005037"
+    ],
+    "FLARE22_Tr_0045": [
+      "BDMAP_00004262"
+    ],
+    "FLARE22_Tr_0046": [
+      "BDMAP_00000993"
+    ],
+    "FLARE22_Tr_0047": [
+      "BDMAP_00001441"
+    ],
+    "FLARE22_Tr_0048": [
+      "BDMAP_00000696"
+    ],
+    "FLARE22_Tr_0049": [
+      "BDMAP_00000558"
+    ],
+    "FLARE22_Tr_0050": [
+      "BDMAP_00003631"
+    ],
+    "amos_0001": [
+      "BDMAP_00001036"
+    ],
+    "amos_0004": [
+      "BDMAP_00000050",
+      "BDMAP_00000523",
+      "BDMAP_00002976"
+    ],
+    "amos_0005": [
+      "BDMAP_00003182"
+    ],
+    "amos_0006": [
+      "BDMAP_00001971"
+    ],
+    "amos_0007": [
+      "BDMAP_00003139"
+    ],
+    "amos_0009": [
+      "BDMAP_00001627"
+    ],
+    "amos_0010": [
+      "BDMAP_00000643"
+    ],
+    "amos_0011": [
+      "BDMAP_00000479",
+      "BDMAP_00004008"
+    ],
+    "amos_0013": [
+      "BDMAP_00001967"
+    ],
+    "amos_0014": [
+      "BDMAP_00000960"
+    ],
+    "amos_0015": [
+      "BDMAP_00005180"
+    ],
+    "amos_0016": [
+      "BDMAP_00001771",
+      "BDMAP_00002162"
+    ],
+    "amos_0017": [
+      "BDMAP_00001771",
+      "BDMAP_00002162"
+    ],
+    "amos_0019": [
+      "BDMAP_00001260"
+    ],
+    "amos_0021": [
+      "BDMAP_00001931"
+    ],
+    "amos_0023": [
+      "BDMAP_00001561"
+    ],
+    "amos_0024": [
+      "BDMAP_00002039",
+      "BDMAP_00003041"
+    ],
+    "amos_0025": [
+      "BDMAP_00000700",
+      "BDMAP_00004684"
+    ],
+    "amos_0027": [
+      "BDMAP_00001231",
+      "BDMAP_00002467"
+    ],
+    "amos_0030": [
+      "BDMAP_00003775"
+    ],
+    "amos_0033": [
+      "BDMAP_00003999"
+    ],
+    "amos_0035": [
+      "BDMAP_00003112"
+    ],
+    "amos_0036": [
+      "BDMAP_00001556"
+    ],
+    "amos_0038": [
+      "BDMAP_00000089"
+    ],
+    "amos_0040": [
+      "BDMAP_00000802"
+    ],
+    "amos_0042": [
+      "BDMAP_00000342",
+      "BDMAP_00003264",
+      "BDMAP_00003845"
+    ],
+    "amos_0043": [
+      "BDMAP_00003818"
+    ],
+    "amos_0044": [
+      "BDMAP_00000071"
+    ],
+    "amos_0045": [
+      "BDMAP_00002372",
+      "BDMAP_00003227"
+    ],
+    "amos_0047": [
+      "BDMAP_00004333"
+    ],
+    "amos_0048": [
+      "BDMAP_00002946"
+    ],
+    "amos_0049": [
+      "BDMAP_00001253"
+    ],
+    "amos_0050": [
+      "BDMAP_00004266"
+    ],
+    "amos_0052": [
+      "BDMAP_00002825"
+    ],
+    "amos_0054": [
+      "BDMAP_00001855"
+    ],
+    "amos_0057": [
+      "BDMAP_00003293"
+    ],
+    "amos_0058": [
+      "BDMAP_00000485"
+    ],
+    "amos_0059": [
+      "BDMAP_00000050",
+      "BDMAP_00000523",
+      "BDMAP_00002976"
+    ],
+    "amos_0060": [
+      "BDMAP_00002046"
+    ],
+    "amos_0061": [
+      "BDMAP_00000050",
+      "BDMAP_00000523",
+      "BDMAP_00002976"
+    ],
+    "amos_0064": [
+      "BDMAP_00000342",
+      "BDMAP_00003264",
+      "BDMAP_00003845"
+    ],
+    "amos_0066": [
+      "BDMAP_00002061",
+      "BDMAP_00002135",
+      "BDMAP_00003712"
+    ],
+    "amos_0067": [
+      "BDMAP_00004644"
+    ],
+    "amos_0069": [
+      "BDMAP_00001196"
+    ],
+    "amos_0071": [
+      "BDMAP_00002014"
+    ],
+    "amos_0072": [
+      "BDMAP_00000551",
+      "BDMAP_00004681"
+    ],
+    "amos_0073": [
+      "BDMAP_00001771",
+      "BDMAP_00002162"
+    ],
+    "amos_0075": [
+      "BDMAP_00002009",
+      "BDMAP_00004937"
+    ],
+    "amos_0076": [
+      "BDMAP_00003716"
+    ],
+    "amos_0077": [
+      "BDMAP_00000975"
+    ],
+    "amos_0078": [
+      "BDMAP_00000479",
+      "BDMAP_00004008"
+    ],
+    "amos_0079": [
+      "BDMAP_00001449"
+    ],
+    "amos_0081": [
+      "BDMAP_00004055"
+    ],
+    "amos_0083": [
+      "BDMAP_00000802"
+    ],
+    "amos_0084": [
+      "BDMAP_00002009",
+      "BDMAP_00004937"
+    ],
+    "amos_0086": [
+      "BDMAP_00002217"
+    ],
+    "amos_0088": [
+      "BDMAP_00001989",
+      "BDMAP_00003471"
+    ],
+    "amos_0089": [
+      "BDMAP_00001655"
+    ],
+    "amos_0092": [
+      "BDMAP_00003303"
+    ],
+    "amos_0094": [
+      "BDMAP_00003445"
+    ],
+    "amos_0097": [
+      "BDMAP_00000548"
+    ],
+    "amos_0098": [
+      "BDMAP_00003006"
+    ],
+    "amos_0099": [
+      "BDMAP_00002357"
+    ],
+    "amos_0103": [
+      "BDMAP_00000291"
+    ],
+    "amos_0104": [
+      "BDMAP_00002061",
+      "BDMAP_00002135",
+      "BDMAP_00003712"
+    ],
+    "amos_0105": [
+      "BDMAP_00001886"
+    ],
+    "amos_0109": [
+      "BDMAP_00001700"
+    ],
+    "amos_0110": [
+      "BDMAP_00003297"
+    ],
+    "amos_0111": [
+      "BDMAP_00004099"
+    ],
+    "amos_0113": [
+      "BDMAP_00003045"
+    ],
+    "amos_0115": [
+      "BDMAP_00000257"
+    ],
+    "amos_0116": [
+      "BDMAP_00004912"
+    ],
+    "amos_0118": [
+      "BDMAP_00001181"
+    ],
+    "amos_0119": [
+      "BDMAP_00003720"
+    ],
+    "amos_0121": [
+      "BDMAP_00003291"
+    ],
+    "amos_0124": [
+      "BDMAP_00003747"
+    ],
+    "amos_0125": [
+      "BDMAP_00004344"
+    ],
+    "amos_0126": [
+      "BDMAP_00003072"
+    ],
+    "amos_0127": [
+      "BDMAP_00004630"
+    ],
+    "amos_0129": [
+      "BDMAP_00001231",
+      "BDMAP_00002467"
+    ],
+    "amos_0131": [
+      "BDMAP_00004545"
+    ],
+    "amos_0133": [
+      "BDMAP_00000845"
+    ],
+    "amos_0134": [
+      "BDMAP_00004330"
+    ],
+    "amos_0135": [
+      "BDMAP_00000420"
+    ],
+    "amos_0137": [
+      "BDMAP_00004628"
+    ],
+    "amos_0138": [
+      "BDMAP_00001967"
+    ],
+    "amos_0141": [
+      "BDMAP_00001400"
+    ],
+    "amos_0142": [
+      "BDMAP_00003594"
+    ],
+    "amos_0143": [
+      "BDMAP_00000531"
+    ],
+    "amos_0147": [
+      "BDMAP_00000694"
+    ],
+    "amos_0149": [
+      "BDMAP_00003949"
+    ],
+    "amos_0152": [
+      "BDMAP_00000272"
+    ],
+    "amos_0153": [
+      "BDMAP_00001640"
+    ],
+    "amos_0154": [
+      "BDMAP_00002061",
+      "BDMAP_00002135",
+      "BDMAP_00003712"
+    ],
+    "amos_0156": [
+      "BDMAP_00001989",
+      "BDMAP_00003471"
+    ],
+    "amos_0158": [
+      "BDMAP_00002504",
+      "BDMAP_00004738",
+      "BDMAP_00005162"
+    ],
+    "amos_0159": [
+      "BDMAP_00000076"
+    ],
+    "amos_0160": [
+      "BDMAP_00003410"
+    ],
+    "amos_0161": [
+      "BDMAP_00001365"
+    ],
+    "amos_0162": [
+      "BDMAP_00000050",
+      "BDMAP_00000523",
+      "BDMAP_00002976"
+    ],
+    "amos_0166": [
+      "BDMAP_00000700",
+      "BDMAP_00004684"
+    ],
+    "amos_0167": [
+      "BDMAP_00000342",
+      "BDMAP_00003264",
+      "BDMAP_00003845"
+    ],
+    "amos_0170": [
+      "BDMAP_00003423"
+    ],
+    "amos_0171": [
+      "BDMAP_00003819"
+    ],
+    "amos_0172": [
+      "BDMAP_00005122"
+    ],
+    "amos_0173": [
+      "BDMAP_00004484"
+    ],
+    "amos_0175": [
+      "BDMAP_00002380"
+    ],
+    "amos_0177": [
+      "BDMAP_00002207",
+      "BDMAP_00004168"
+    ],
+    "amos_0179": [
+      "BDMAP_00002207",
+      "BDMAP_00004168"
+    ],
+    "amos_0180": [
+      "BDMAP_00003351"
+    ],
+    "amos_0181": [
+      "BDMAP_00000597"
+    ],
+    "amos_0184": [
+      "BDMAP_00005050"
+    ],
+    "amos_0185": [
+      "BDMAP_00002536"
+    ],
+    "amos_0186": [
+      "BDMAP_00002734"
+    ],
+    "amos_0188": [
+      "BDMAP_00003503",
+      "BDMAP_00003791"
+    ],
+    "amos_0190": [
+      "BDMAP_00003127"
+    ],
+    "amos_0192": [
+      "BDMAP_00003503",
+      "BDMAP_00003791"
+    ],
+    "amos_0193": [
+      "BDMAP_00001740"
+    ],
+    "amos_0195": [
+      "BDMAP_00002077"
+    ],
+    "amos_0196": [
+      "BDMAP_00000342",
+      "BDMAP_00003264",
+      "BDMAP_00003845"
+    ],
+    "amos_0197": [
+      "BDMAP_00005035"
+    ],
+    "amos_0198": [
+      "BDMAP_00001217"
+    ],
+    "amos_0199": [
+      "BDMAP_00001053"
+    ],
+    "amos_0212": [
+      "BDMAP_00003625"
+    ],
+    "amos_0214": [
+      "BDMAP_00000195"
+    ],
+    "amos_0215": [
+      "BDMAP_00004463"
+    ],
+    "amos_0217": [
+      "BDMAP_00003967"
+    ],
+    "amos_0224": [
+      "BDMAP_00002234"
+    ],
+    "amos_0226": [
+      "BDMAP_00004941"
+    ],
+    "amos_0230": [
+      "BDMAP_00004151"
+    ],
+    "amos_0231": [
+      "BDMAP_00000160"
+    ],
+    "amos_0235": [
+      "BDMAP_00001901"
+    ],
+    "amos_0237": [
+      "BDMAP_00004153"
+    ],
+    "amos_0239": [
+      "BDMAP_00000766"
+    ],
+    "amos_0242": [
+      "BDMAP_00005053"
+    ],
+    "amos_0245": [
+      "BDMAP_00003340"
+    ],
+    "amos_0249": [
+      "BDMAP_00001775"
+    ],
+    "amos_0254": [
+      "BDMAP_00003246"
+    ],
+    "amos_0259": [
+      "BDMAP_00004189"
+    ],
+    "amos_0263": [
+      "BDMAP_00004440"
+    ],
+    "amos_0264": [
+      "BDMAP_00002023"
+    ],
+    "amos_0268": [
+      "BDMAP_00004362"
+    ],
+    "amos_0272": [
+      "BDMAP_00001759"
+    ],
+    "amos_0273": [
+      "BDMAP_00003317"
+    ],
+    "amos_0274": [
+      "BDMAP_00003285"
+    ],
+    "amos_0276": [
+      "BDMAP_00004351"
+    ],
+    "amos_0279": [
+      "BDMAP_00000729"
+    ],
+    "amos_0281": [
+      "BDMAP_00002365"
+    ],
+    "amos_0282": [
+      "BDMAP_00001100"
+    ],
+    "amos_0288": [
+      "BDMAP_00000151"
+    ],
+    "amos_0294": [
+      "BDMAP_00001285"
+    ],
+    "amos_0296": [
+      "BDMAP_00004669"
+    ],
+    "amos_0299": [
+      "BDMAP_00002544"
+    ],
+    "amos_0301": [
+      "BDMAP_00003242"
+    ],
+    "amos_0302": [
+      "BDMAP_00003519"
+    ],
+    "amos_0307": [
+      "BDMAP_00004540"
+    ],
+    "amos_0317": [
+      "BDMAP_00001070"
+    ],
+    "amos_0320": [
+      "BDMAP_00004536"
+    ],
+    "amos_0321": [
+      "BDMAP_00004258"
+    ],
+    "amos_0330": [
+      "BDMAP_00004110"
+    ],
+    "amos_0332": [
+      "BDMAP_00000326"
+    ],
+    "amos_0336": [
+      "BDMAP_00001151"
+    ],
+    "amos_0337": [
+      "BDMAP_00002448"
+    ],
+    "amos_0341": [
+      "BDMAP_00002561"
+    ],
+    "amos_0348": [
+      "BDMAP_00000254"
+    ],
+    "amos_0349": [
+      "BDMAP_00002937"
+    ],
+    "amos_0350": [
+      "BDMAP_00000484"
+    ],
+    "amos_0351": [
+      "BDMAP_00004068"
+    ],
+    "amos_0353": [
+      "BDMAP_00004388"
+    ],
+    "amos_0358": [
+      "BDMAP_00003574"
+    ],
+    "amos_0361": [
+      "BDMAP_00000752"
+    ],
+    "amos_0362": [
+      "BDMAP_00000443"
+    ],
+    "amos_0366": [
+      "BDMAP_00003799"
+    ],
+    "amos_0367": [
+      "BDMAP_00002372",
+      "BDMAP_00003227"
+    ],
+    "amos_0370": [
+      "BDMAP_00004779"
+    ],
+    "amos_0371": [
+      "BDMAP_00003731"
+    ],
+    "amos_0374": [
+      "BDMAP_00001764"
+    ],
+    "amos_0376": [
+      "BDMAP_00000384"
+    ],
+    "amos_0378": [
+      "BDMAP_00002859"
+    ],
+    "amos_0379": [
+      "BDMAP_00004619"
+    ],
+    "amos_0380": [
+      "BDMAP_00003217"
+    ],
+    "amos_0381": [
+      "BDMAP_00003834"
+    ],
+    "amos_0384": [
+      "BDMAP_00003147"
+    ],
+    "amos_0387": [
+      "BDMAP_00004539"
+    ],
+    "amos_0388": [
+      "BDMAP_00003280"
+    ],
+    "amos_0390": [
+      "BDMAP_00000478"
+    ],
+    "amos_0391": [
+      "BDMAP_00000865"
+    ],
+    "amos_0392": [
+      "BDMAP_00001442"
+    ],
+    "amos_0395": [
+      "BDMAP_00005147"
+    ],
+    "amos_0396": [
+      "BDMAP_00003273"
+    ],
+    "amos_0398": [
+      "BDMAP_00004715"
+    ],
+    "amos_0400": [
+      "BDMAP_00002098"
+    ],
+    "amos_0401": [
+      "BDMAP_00003582"
+    ],
+    "amos_0402": [
+      "BDMAP_00002660"
+    ],
+    "amos_0403": [
+      "BDMAP_00004997"
+    ],
+    "amos_0404": [
+      "BDMAP_00000314"
+    ],
+    "amos_0405": [
+      "BDMAP_00000551",
+      "BDMAP_00004681"
+    ],
+    "amos_0406": [
+      "BDMAP_00003988"
+    ],
+    "amos_0408": [
+      "BDMAP_00002554"
+    ],
+    "amos_0410": [
+      "BDMAP_00000822"
+    ],
+    "btcv_label0001": [
+      "BDMAP_00002109"
+    ],
+    "btcv_label0002": [
+      "BDMAP_00003539"
+    ],
+    "btcv_label0003": [
+      "BDMAP_00003858"
+    ],
+    "btcv_label0004": [
+      "BDMAP_00004418"
+    ],
+    "btcv_label0005": [
+      "BDMAP_00004840"
+    ],
+    "btcv_label0006": [
+      "BDMAP_00004421"
+    ],
+    "btcv_label0007": [
+      "BDMAP_00002019"
+    ],
+    "btcv_label0008": [
+      "BDMAP_00002367"
+    ],
+    "btcv_label0009": [
+      "BDMAP_00000220",
+      "BDMAP_00004145"
+    ],
+    "btcv_label0010": [
+      "BDMAP_00004594"
+    ],
+    "btcv_label0021": [
+      "BDMAP_00003906"
+    ],
+    "btcv_label0022": [
+      "BDMAP_00004069"
+    ],
+    "btcv_label0023": [
+      "BDMAP_00000495"
+    ],
+    "btcv_label0025": [
+      "BDMAP_00001417"
+    ],
+    "btcv_label0026": [
+      "BDMAP_00003982"
+    ],
+    "btcv_label0027": [
+      "BDMAP_00004913"
+    ],
+    "btcv_label0028": [
+      "BDMAP_00000821",
+      "BDMAP_00005557"
+    ],
+    "btcv_label0029": [
+      "BDMAP_00003222"
+    ],
+    "btcv_label0030": [
+      "BDMAP_00001074"
+    ],
+    "btcv_label0031": [
+      "BDMAP_00003647"
+    ],
+    "btcv_label0032": [
+      "BDMAP_00003702"
+    ],
+    "btcv_label0034": [
+      "BDMAP_00000020"
+    ],
+    "btcv_label0035": [
+      "BDMAP_00004094"
+    ],
+    "btcv_label0036": [
+      "BDMAP_00001447"
+    ],
+    "btcv_label0037": [
+      "BDMAP_00000580"
+    ],
+    "btcv_label0038": [
+      "BDMAP_00003372"
+    ],
+    "btcv_label0039": [
+      "BDMAP_00003960"
+    ],
+    "btcv_label0040": [
+      "BDMAP_00000109"
+    ]
+  },
+  "agreement_with_ABDOMENATLAS_PROVENANCE": {
+    "both_methods": 269,
+    "same_bdmap_id": 269,
+    "only_geometry": [
+      "amos_0013",
+      "amos_0040",
+      "amos_0061",
+      "amos_0073",
+      "amos_0167"
+    ],
+    "only_adrenalgold_image_match": [
+      "FLARE22_Tr_0001",
+      "FLARE22_Tr_0022",
+      "FLARE22_Tr_0034",
+      "FLARE22_Tr_0037",
+      "amos_0225",
+      "amos_0248",
+      "amos_0297",
+      "amos_0383",
+      "btcv_label0024",
+      "btcv_label0033"
+    ]
+  },
+  "union_counts": {
+    "amos": 204,
+    "flare": 50,
+    "btcv": 30
+  },
+  "comparison_matched75_in_training_union": [
+    "FLARE22_Tr_0007",
+    "FLARE22_Tr_0009",
+    "FLARE22_Tr_0011",
+    "FLARE22_Tr_0015",
+    "FLARE22_Tr_0017",
+    "FLARE22_Tr_0022",
+    "FLARE22_Tr_0036",
+    "FLARE22_Tr_0040",
+    "FLARE22_Tr_0044",
+    "FLARE22_Tr_0050",
+    "amos_0006",
+    "amos_0016",
+    "amos_0017",
+    "amos_0021",
+    "amos_0027",
+    "amos_0030",
+    "amos_0042",
+    "amos_0045",
+    "amos_0047",
+    "amos_0088",
+    "amos_0097",
+    "amos_0109",
+    "amos_0124",
+    "amos_0129",
+    "amos_0133",
+    "amos_0141",
+    "amos_0153",
+    "amos_0161",
+    "amos_0171",
+    "amos_0177",
+    "amos_0181",
+    "amos_0215",
+    "amos_0242",
+    "amos_0268",
+    "amos_0272",
+    "amos_0282",
+    "amos_0299",
+    "amos_0321",
+    "amos_0337",
+    "amos_0341",
+    "amos_0353",
+    "amos_0361",
+    "amos_0366",
+    "amos_0370",
+    "amos_0396",
+    "amos_0402",
+    "amos_0405",
+    "btcv_label0005",
+    "btcv_label0021",
+    "btcv_label0028",
+    "btcv_label0029",
+    "btcv_label0030",
+    "btcv_label0038"
+  ]
+}
