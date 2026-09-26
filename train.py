@@ -21,6 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('ADRENAL_DATA', ROOT / 'data'))
 RUN = os.environ.get('ADRENAL_RUN', 'atlasnet')  # 'd997': the D997 fine-tune on Dataset903 (finetune.py)
+if RUN not in ('atlasnet', 'd997'):
+    raise ValueError(f'Unknown ADRENAL_RUN: {RUN!r}; expected atlasnet or d997')
 CONFIGURATION = '3d_fullres'
 FOLD = 0
 SEED = 42

@@ -4,28 +4,29 @@ Fine-tuning AtlasNet (nnU-Net) to segment the adrenal glands, kidneys, liver, sp
 
 **Continuing this work (agents and people): read [AGENTS.md](AGENTS.md) first** for current state, VM access and open decisions.
 
-D997/D998 historical training and validation membership, recovered case lists, and source evidence are in [docs/MODEL_SPLITS.md](docs/MODEL_SPLITS.md). D997 has a corroborated 1,082-case training list and 57 verified validation IDs; D998 has 56 verified validation IDs but its exact training list remains unknown.
+D997/D998 membership and evidence are in [docs/MODEL_SPLITS.md](docs/MODEL_SPLITS.md): D997 has 1,082 recovered training cases and 57 validation cases; D998 has 1,072 reconstructed training cases and 56 verified validation cases.
 
 Recovered AbdomenAtlas-to-AMOS/BTCV/FLARE case mappings and matching-method limitations are in [docs/ABDOMENATLAS_PROVENANCE.md](docs/ABDOMENATLAS_PROVENANCE.md).
 
 The work is a short sequence of steps. Each step is one small script that logs what it did and records the exact inputs it used. Everything runs on one Google Cloud machine (one NVIDIA RTX PRO 6000, 48 vCPUs), started with one command; each script can also be run by hand.
 
-| Step | Script | What it does | Status (September 19, 2026) |
-|---|---|---|---|
-| 1 | `cohort_scan.py` | Measures every scan and applies the label rules: adrenal size, fragments, glands cut by the scan edge, left/right check, slice thickness | ran on Google Cloud on all 1,608 scans, no read errors |
-| 2 | `build_dataset.py` | Writes the cleaned 9-class nnU-Net dataset and the stratified test/validation/training split | ran on Google Cloud: 1,394 scans written, none failed |
-| 3 | `preprocess.py` | nnU-Net's integrity check and preprocessing to 1.0 mm with AtlasNet's plans and SimpleITK resampling; continues after an interruption | ran to completion on Google Cloud (about 20 minutes, 170 GB); the resumable version is tested locally only |
-| 1-3 | `prepare.sh` | Downloads the four datasets from Hugging Face and runs steps 1-3; uploads the tables of steps 1-2 before preprocessing starts | ran to completion on Google Cloud |
-| cache | `hf_cache.py` | Restores a verified copy of the prepared data on a new machine, or uploads one in the background while training runs; atomic checkpoint snapshots | 27 offline tests pass; no real upload or restore has completed yet |
-| 4 | `train.py`, `trainers/adrenal_multiorgan.py` | Training: one command, continues by itself | trainer checked on CPU; no epoch has run on a GPU yet |
-| 5 | `predict.py` | Segments the held-out test scans and scores them with `evaluate.py` | scoring tested; prediction not yet run |
-| 6 | `evaluate.py` | Dice, surface Dice (0.5, 0.8, 1.0 mm; `surface-distance` package) and volume error per scan and organ; reports for all organs, adrenals, aorta | tested on synthetic masks |
-| – | `compare.py`, `batched_predictor.py`, `colab_compare.sh` | The same prediction and scoring for other models (AtlasNet, two TotalSegmentator-label models) on a Colab A100 | not yet run |
-| all | `gcp/` | Creates or restarts the Spot machine, which runs everything above and switches itself off | creation, setup and preparation work; training and the automatic switch-off are not yet confirmed |
+Dataset902 completed 2,000 epochs; comparisons use its best epoch-1957 checkpoint. Operational status is maintained in AGENTS.md.
+
+| Script | Purpose |
+|---|---|
+| `cohort_scan.py`, `build_dataset.py` | Audit labels, clean masks and fix Dataset902 splits |
+| `prepare.sh`, `preprocess.py`, `hf_cache.py` | Download, preprocess and restore verified data |
+| `train.py`, `trainers/` | Train or resume a fingerprinted run |
+| `predict.py`, `compare.py`, `batched_predictor.py` | Native-grid inference and model comparisons |
+| `evaluate.py` | Dice, surface Dice and volume errors |
+| `evaluate_totalseg.py` | Raw TotalSegmentator scoring by Dataset902 split; [usage](docs/TOTALSEG_EVALUATION.md) |
+| `gcp/` | VM setup and run lifecycle |
 
 `vendor/nnUNet` is nnU-Net 2.8.1 plus two SimpleITK resampling modules; see [vendor/README.md](vendor/README.md). `pixi.lock` pins the environment of the machine.
 
-## Running it on Google Cloud
+## Original Google Cloud setup
+
+For the retained `adrenal-train` VM, use the current recipes in AGENTS.md. The commands below document the original setup.
 
 In a terminal with the Google Cloud CLI (or Google Cloud Shell: console.cloud.google.com, the `>_` button), with the project selected:
 
@@ -44,7 +45,7 @@ This creates a Spot machine with one RTX PRO 6000 in the first us-central1 zone 
 
 The prepared data contains the `.b2nd` arrays, case properties, patch-sampling index, plans, splits, validation labels, test scans and AtlasNet weights. A completion manifest is uploaded last; a partial upload never counts as ready. See [docs/HF_CACHE.md](docs/HF_CACHE.md) for the integrity, compatibility and recovery rules.
 
-Google may stop a Spot machine at any time. **Running the same line again starts it again**: preparation that was finished is kept (an interrupted preprocessing continues with the scans that are left), training continues from the last checkpoint on the disk, and the background upload resumes. `bash adrenal-multiorgan/gcp/progress.sh` shows the state and the latest lines, also after the machine has switched off. When the work is finished, `bash adrenal-multiorgan/gcp/delete_vm.sh` deletes the machine and its disk; the disk costs money for as long as it exists. A replacement machine can restore only what finished uploading: the prepared data if its upload completed (otherwise it prepares again, about 40 minutes), and the last uploaded checkpoint.
+Google may interrupt a Spot machine. With the appropriate startup script, preparation and training resume from verified data and checkpoints. `bash adrenal-multiorgan/gcp/progress.sh` shows logs after shutdown. A replacement machine can restore only completed uploads. Preserve the retained VM and disk as specified in AGENTS.md.
 
 To follow the work from inside the machine (`gcloud compute ssh adrenal-train --zone=us-central1-f`; no `sudo` needed):
 

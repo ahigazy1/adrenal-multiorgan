@@ -33,6 +33,17 @@ TOLERANCES_MM = [0.5, 0.8, 1.0]
 REPORTS = {'all_organs': list(LABELS), 'adrenal': ['adrenal_left', 'adrenal_right'], 'aorta': ['aorta']}
 
 
+def volume_metrics(in_truth, in_prediction, intersection, voxel_ml):
+    """Shared Dice/volume definitions; percent error is undefined for an absent reference."""
+    error = (in_prediction - in_truth) * voxel_ml
+    percent = 100 * (in_prediction - in_truth) / in_truth if in_truth else None
+    return {'reference_ml': in_truth * voxel_ml, 'predicted_ml': in_prediction * voxel_ml,
+            'volume_error_ml': error, 'absolute_volume_error_ml': abs(error),
+            'volume_error_pct': percent, 'absolute_volume_error_pct': abs(percent) if percent is not None else None,
+            'dice': 2 * intersection / (in_truth + in_prediction) if in_truth + in_prediction else None,
+            'miss': in_truth > 0 and in_prediction == 0}
+
+
 def score_scan(paths, organs=tuple(LABELS)):
     reference_path, prediction_path = paths
     reference, prediction = nib.load(reference_path), nib.load(prediction_path)
@@ -47,12 +58,8 @@ def score_scan(paths, organs=tuple(LABELS)):
         a, b = truth == value, predicted == value
         in_truth, in_prediction = int(a.sum()), int(b.sum())
         row = {'case': reference_path.name[:-7], 'source': reference_path.name.split('_')[0], 'organ': organ,
-               'reference_ml': in_truth * voxel_ml, 'predicted_ml': in_prediction * voxel_ml,
-               'volume_error_ml': (in_prediction - in_truth) * voxel_ml,
-               'absolute_volume_error_ml': abs(in_prediction - in_truth) * voxel_ml,
-               'miss': in_truth > 0 and in_prediction == 0}
+               **volume_metrics(in_truth, in_prediction, int((a & b).sum()), voxel_ml)}
         if in_truth + in_prediction:
-            row['dice'] = 2 * int((a & b).sum()) / (in_truth + in_prediction)
             both = in_truth and in_prediction
             distances = metrics.compute_surface_distances(a, b, spacing_mm=spacing) if both else None
             for tolerance in TOLERANCES_MM:

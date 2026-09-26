@@ -200,7 +200,7 @@ def write_provenance(data, scanned, old_role, new):
             'atlasnet_finetune': old_role.get(name, 'excluded'),  # Dataset902: excluded = its stricter rule
             'd997_finetune': new[name]['role'] if name in new else 'excluded (fragmented, left/right or > 5 mm)',
             'd997_finetune_exclusion': new.get(name, {}).get('reason', ''),
-            'd997_d998_pretraining': 'See docs/model-splits: D997 recovered membership; D998 validation only; not joined here' if not labelled else 'not recorded',
+            'd997_d998_pretraining': 'See docs/model-splits: D997 recovered; D998 reconstructed membership; not joined here' if not labelled else 'not used',
             'comparison_test279': 'yes' if old_role.get(name) == 'test' else '',
             'comparison_matched75': 'yes' if old_role.get(name) == 'test' and labelled else '',
             'comparison_external330': 'yes' if r['source'] in ('amos', 'btcv') else '',
@@ -211,13 +211,13 @@ def write_provenance(data, scanned, old_role, new):
         'models': {
             'D997': {'weights': D997, 'training_data': 'Dataset997_ChestAbd: 1082 train / 57 validation; training list corroborated, validation IDs verified against final run log; docs/model-splits/D997.json'},
             'D998': {'weights': 'ahigazy1/AdrenalSeg-Sources Dataset998_TotalSeg66classes fold 0 checkpoint_final',
-                     'training_data': 'Dataset998 (internally Dataset999_TotalSeg66classes), numTraining 1128; 56 validation IDs verified, 1072 train inferred, training IDs unknown; docs/model-splits/D998.json'},
-            'AtlasNet': {'weights': 'AbdomenAtlas/AtlasNet fd03b410 (sha256 73ff6cb8...)', 'training_data': 'AbdomenAtlas (per model card); case list not checked against these scans'},
+                      'training_data': 'Dataset998 (internally Dataset999_TotalSeg66classes); 56 validation IDs verified, 1072 training IDs reconstructed from fingerprint; docs/model-splits/D998.json'},
+            'AtlasNet': {'weights': 'AbdomenAtlas/AtlasNet fd03b410 (sha256 73ff6cb8...)', 'training_data': 'AbdomenAtlas 3.0; recovered overlap in docs/ABDOMENATLAS_PROVENANCE.md'},
             'AtlasNet fine-tune (ours-epoch1957)': {'dataset': 'Dataset902_AdrenalMultiorgan', 'column': 'atlasnet_finetune'},
             'D997 fine-tune': {'dataset': DATASET, 'column': 'd997_finetune', 'split': 'Dataset902 test and validation unchanged; newly kept scans train only'}},
         'comparison_sets': {'comparison_test279': 'Dataset902 test scans', 'comparison_matched75': 'AMOS/BTCV/FLARE part of the 279 (report pages 2-5)',
                             'comparison_external330': 'all labelled AMOS + BTCV (overlaps fine-tune training)', 'comparison_flare50': 'all 50 FLARE22 (overlaps fine-tune training)'},
-        'not_used_as_test': 'RAOS: its ground truth over-segments (user); partial comparisons only'}, indent=2))
+        'not_used_as_test': 'RAOS: user designated labelled training-only data; not yet included by this builder'}, indent=2))
 
 
 def preprocess(args):

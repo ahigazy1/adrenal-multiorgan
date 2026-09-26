@@ -1,6 +1,6 @@
 # Specification
 
-Last updated September 19, 2026. Status: every step is written. Download, scan, dataset, split and preprocessing have run to completion on the Google Cloud machine; training, prediction and the upload/restore of the prepared data have not yet run there. Results used for publication come only from the logged run on that machine. Local runs are for testing code.
+Historical specification for the completed Dataset902 run (September 19, 2026). The run finished 2,000 epochs; the evaluated best checkpoint is epoch 1957. Current operations and the separate, paused D997 proposal are in [AGENTS.md](AGENTS.md). The design below records Dataset902, not approval for another run.
 
 ## Setup
 

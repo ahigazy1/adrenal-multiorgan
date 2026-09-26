@@ -1,148 +1,85 @@
-# AGENTS.md: picking up this project
+# Operating guide
 
-Read this first. It records the project handoff and **cleanup verified 2026-09-26 03:07 UTC**, written so another agent (or person) can continue without the chat history. When anything here disagrees with live state, live state wins: re-check before acting.
+Updated September 26, 2026. Recheck live logs before reporting progress. Historical chronology is in the handoff's `DESTINATION_STATE.md`; this file records current rules and locations.
 
-## Ground rules from the user
+## Rules
 
-- **One training run only.** Nothing may be launched until the fine-tune design is agreed with the user. Smoke tests and checks are fine; the real run needs explicit approval.
-- **No paid-resource launches or deletions without asking.** Never delete the `adrenal-train` VM or its disk.
-- Ponytail style: reuse existing code, stdlib first, minimum code, Polars over pandas, compact factual reports, simple operator commands. Every claim should come from a log, file or command output, not memory.
-- **Do not edit these files:** `cohort_scan.py`, `build_dataset.py`, `preprocess.py`, `prepare.sh`, `atlasnet_plans.json`, `pixi.lock`, `vendor/`, `trainers/adrenal_multiorgan.py`. Their hashes fingerprint the finished Dataset902 run (`train.py` `run_record`) and its preprocessing cache (`hf_cache.recipe_id`). Editing them breaks resume and prediction for that run. Subclass or wrap instead, as `finetune.py` and `trainers/d997_finetune.py` do.
-- Commit identity: this computer has no git identity. Use a per-command identity; do not change git config:
-  `git -c user.name=ahigazy1 -c user.email=168588872+ahigazy1@users.noreply.github.com commit ...`
-  For a rebase, export `GIT_AUTHOR_NAME/EMAIL` and `GIT_COMMITTER_NAME/EMAIL` instead. End commit messages with the Co-Authored-By line used in `git log`.
-- The user sometimes pushes from another session. `git fetch` before every commit, and rebase instead of force-pushing.
+- One new training run only, after the user agrees the design. No training or paid-resource launches without approval. Never delete `adrenal-train` or its disk.
+- Preserve local changes. Reuse existing code, prefer stdlib and Polars, and keep implementations small.
+- Do not edit `cohort_scan.py`, `build_dataset.py`, `preprocess.py`, `prepare.sh`, `atlasnet_plans.json`, `pixi.lock`, `vendor/`, or `trainers/adrenal_multiorgan.py`: their hashes fingerprint the finished Dataset902 run/cache. Wrap or subclass instead.
+- Result overviews: left/right adrenals, aorta, pancreas and liver; Dice plus signed/absolute volume errors.
+- Before every commit, fetch; another session may push. Rebase rather than force-push. Use per-command identity: `git -c user.name=ahigazy1 -c user.email=168588872+ahigazy1@users.noreply.github.com commit ...`. End messages with the Co-Authored-By convention in `git log`. Do not change git config.
+- Never print or persist HF tokens. No history squashing or remote deletion without approval.
 
-## Models and what is settled
+## Models and evidence
 
-| Name | What | Where |
-|---|---|---|
-| D997 | nnU-Net ResEncL, 66 classes, 1.5 mm, 8,000 epochs, trained on TotalSegmentator only | HF `ahigazy1/adrenal-training-models` `labmate/` @ `3a52ec5a`, checkpoint sha256 `0840b5b1...`. Needs the reorienting reader (`NibabelIOWithReorient`); its plans say `NibabelIO`, which is the known bug. |
-| D998 | nnU-Net ResEncL, same 66 classes and IDs, 2,000 epochs | HF `ahigazy1/AdrenalSeg-Sources` `Dataset998_TotalSeg66classes/...` @ `873ffe7a` |
-| AtlasNet | nnU-Net, trained on all of AbdomenAtlas 3.0 | HF `AbdomenAtlas/AtlasNet` @ `fd03b410` |
-| AtlasNet fine-tune (`ours-epoch1957`) | our Dataset902 run, 9 classes, 1 mm, focal Tversky | HF `ahigazy1/adrenal-multiorgan-model` |
-
-**Splits for every model:** see [docs/MODEL_SPLITS.md](docs/MODEL_SPLITS.md). `python docs/model-splits/check.py` recomputes and verifies them.
-- **D997:** 1,082 train / 57 validation, recovered lists.
-- **D998:** 1,072 train, reconstructed uniquely from its fingerprint (D997's training list minus 10) / 56 validation.
-- **AtlasNet:** AbdomenAtlas contains 204 of 300 AMOS, all 30 BTCV and all 50 FLARE22 scans, including **53 of the 75-scan comparison set**. Two independent methods agree; see also [docs/ABDOMENATLAS_PROVENANCE.md](docs/ABDOMENATLAS_PROVENANCE.md).
-- **D997 and D998 never saw AMOS/BTCV/FLARE**, so the 75 scans are truly held out for them. They did see about 93% of TotalSegmentator.
-
-**Pseudo-labels (done):** TotalSegmentator 2.18, D997's 66 classes, 380 labelled scans (AMOS 300, BTCV 30, FLARE22 50).
-- **Where:** HF `ahigazy1/adrenal-pseudolabels` (public for now; the user will make it private later), prefix `pseudolabels/totalseg-2.18.0/bfece4a56f11d1f1`, commit `3421a9d`. Uses `roi_subset` (runs only the organ, vertebra and cardiac models).
-- **Accuracy vs full TotalSegmentator:** equivalent on AMOS ground truth (Dice 0.7995 vs 0.8004).
-- **Score vs ground truth:** `evaluation/` in the same repo. Adrenal Dice is about 0.71, so real labels must override pseudo-labels.
-
-**Comparisons (done):** on HF `adrenal-multiorgan-model`:
-- `comparison/`: the 279-scan test set
-- `comparison-external/`: all 330 AMOS+BTCV
-- `comparison-flare/`: all 50 FLARE22, D997 and D998
-- `comparison-raos/`: partial; not a test set, since the user says RAOS ground truth over-segments
-
-## Fine-tune: decided vs open
-
-**Decided by the user:**
-- D997 at 1.5 mm
-- CE + focal Tversky loss (0.4 FP / 0.6 FN, exponent 0.75)
-- stock nnU-Net augmentation **without mirroring**
-- include TotalSegmentator scans
-- RAOS **for training only**
-- one run
-
-**Built but paused. Do not run until the design is agreed:**
-- **`finetune.py`:** builds Dataset903 and preprocesses it with D997's plans.
-  - **Labels:** real labels are authoritative; pseudo-labels fill the other classes; adrenals are written last; kidney cysts merge into kidneys.
-  - **Revised exclusion rule:** glands cut off by the scan edge are kept. Drop a scan only for a fragmented gland, a fully visible gland ≤ 1 mL, or a failed left/right check.
-  - **Split:** Dataset902's test and validation sets, unchanged.
-  - **Provenance:** writes `provenance.csv` and `provenance.json`.
-- **`trainers/d997_finetune.py`, `ADRENAL_RUN=d997 python train.py`, and `gcp/finetune_startup.sh`.**
-- **Partial build removed:** the killed build at `/opt/adrenal-multiorgan/data/nnUNet_raw/Dataset903_D997Finetune` was verified to have no finished marker and deleted during user-requested cleanup on 2026-09-26. A new build is still paused pending design agreement.
-
-**Must fix before building** (from the code review; details in the handoff folder's DESTINATION_STATE.md):
-1. Clear `Dataset903` at build start, and put the git SHA in its finished marker.
-2. Score test scans only on each source's real-label organs.
-3. Remove the shutdown placeholder (see the VM section) and restore the training startup script before the run.
-4. Set the data-loader environment variables in `finetune_startup.sh`, as `gcp/startup.sh` does.
-5. Make `train.py` reject any `ADRENAL_RUN` other than `atlasnet` or `d997`.
-6. Delete any smoke-test model folder before the real run: `EPOCHS` is part of the run fingerprint.
-7. Fix provenance labels for scans that failed the initial scan (they're recorded as excluded for the wrong reason).
-8. Replace `EPOCHS = 1000` in `d997_finetune.py` with a value based on the smoke test's seconds per epoch.
-
-**Open decisions (ask the user):**
-- (a) Test only on the 75 AMOS/BTCV/FLARE scans for D997-based models, with TotalSegmentator test scans reported separately as "seen in pretraining"?
-- (b) Validate and select checkpoints on AMOS/BTCV/FLARE plus the TotalSegmentator scans neither D997 nor D998 used (89 scans)?
-- (c) Sample about 50/50 between AMOS/BTCV/FLARE and TotalSegmentator?
-- (d) Which pseudo-label teacher, TotalSegmentator or VISTA3D, per class? Wait for the teacher comparison.
-- (e) RAOS labels: RAOS ground truth over-segments per the user. Use its labels (all, or all except adrenals), or only its images with pseudo-labels?
-
-## In progress when this was written
-
-- **VISTA3D pseudo-labels: done** for all 380 scans (`pseudolabels/vista3d/run.sh`). Outputs are in `/opt/vista/out/<shard>/<case>/<case>_trans.nii.gz` on the VM, with raw VISTA3D label IDs; `compare_teachers.py` maps them to D997's classes. They're **not uploaded to HF yet**. The PyTorch 2.9+ indexing warning is harmless.
-- **Teacher comparison: done.** `/opt/pseudo/evaluation/teachers_vs_ground_truth.csv` on the VM (not uploaded). Mean Dice, TotalSegmentator / VISTA3D, against each source's labels:
-  - Adrenals: AMOS 0.70/0.75 (left), 0.69/0.74 (right); BTCV 0.69/0.72, 0.72/0.72; FLARE22 0.84/0.84, 0.83/0.83.
-  - Pancreas: AMOS 0.81/0.84, BTCV 0.81/0.84, FLARE22 0.83/0.89.
-  - Duodenum: AMOS 0.69/0.76, FLARE22 0.77/0.82.
-  - Gallbladder: AMOS 0.79/0.83, BTCV 0.70/0.80, FLARE22 0.89/0.91.
-  - Large organs: within ±0.015.
-
-  **Caveat:** VISTA3D's training data includes AMOS22 (64% of its scans) and TotalSegmentator, and possibly FLARE through AbdomenCT-1K. So its AMOS advantage is inflated. FLARE22 is the fairest comparison: there the adrenals are tied, and VISTA3D is clearly better on pancreas, duodenum and gallbladder.
-- **RAOS:** downloaded to `/opt/adrenal-multiorgan/data/raos-source/RAOS-Real` (826 files: 413 scans plus labels), AdrenalSeg-Sources @ `873ffe7a`. There are no pseudo-labels for RAOS yet: it needs TotalSegmentator (add a `raos` source to `pseudolabels/pseudolabel.py`; its old RAOS layout code is in commit `29c4003`) and VISTA3D (link the RAOS images into a new input folder).
-
-## Google Cloud and the VM
-
-- **gcloud account** `zakiyaferdousi@gmail.com`, **project** `adrenal-seg`. HF token: Secret Manager secret `HF_TOKEN`, readable by the account and by the VM's service account. **Never print it or save it to disk.**
-- **VM `adrenal-train`**, us-central1-f: g4-standard-48 Spot (RTX PRO 6000, 96 GB), 500 GB disk (204 GiB free after cleanup). **It is RUNNING and billing at the last check.** Only us-central1-f works (the disk is zonal); if Spot capacity is short, retrying later works.
-- **Why nothing else can be created:** the project's Hyperdisk quota is 500 GB, all used by this disk, and increase requests were auto-denied. No second VM is possible.
-- **Current VM state, which matters:**
-  - **Startup script:** the startup-script metadata is the **pseudo-label** script, not the training one. Before training, restore it: [../../ops/pseudo-on-adrenal-train/README.md](../../ops/pseudo-on-adrenal-train/README.md) in the handoff folder, `original-training-startup.sh`. Or set `gcp/finetune_startup.sh` with metadata `finetune-revision=<full 40-character sha>`.
-  - **Shutdown placeholder:** `/root/.local/bin/shutdown` stops startup scripts from powering off the VM, because the user asked to keep it running. It only takes effect where `/root/.local/bin` is first in `PATH`. **Remove it** (`sudo rm /root/.local/bin/shutdown`) so runs power off when done.
-  - **Metadata keys:** `pseudo-revision`, `pseudo-workers` (safe to remove after restoring).
-- **What's on the disk:**
-
-| Path | Contents |
+| Model | Identity |
 |---|---|
-| `/opt/adrenal-multiorgan` | Frozen training checkout plus `data/`: TotalSegmentator zip, AMOS/BTCV/FLARE sources, Dataset902 raw and preprocessed, `raos-source`, `d997`. Leave the checkout alone. |
-| `/opt/pseudo`, `/opt/pseudo-run`, `/opt/pseudo-env` | Pseudo-labels (all attempts), their code, and their Python environment |
-| `/opt/flare-run` | FLARE comparison checkout; its pixi environment has `psutil` added via uv |
-| `/opt/finetune-run` | Fine-tune checkout at `8920e4a`, pixi environment |
-| `/opt/vista` | VISTA3D environment (uv; torch cu128, monai 1.4.0, pytorch-ignite), bundle, `in/` symlinks, `out/` |
-| `/opt/atlas-check` | Removed during 2026-09-26 cleanup: 18 disposable extracted AbdomenAtlas scans |
+| D997 | 66 classes, 1.5 mm, 8,000 epochs; HF `ahigazy1/adrenal-training-models/labmate` @ `3a52ec5a`; checkpoint `0840b5b1...`. Inference requires `NibabelIOWithReorient`, correcting its published reader. |
+| D998 | 66 classes, 1.5 mm, 2,000 epochs configured; HF dataset `ahigazy1/AdrenalSeg-Sources` @ `873ffe7a`, `Dataset998_TotalSeg66classes/`. |
+| AtlasNet | AbdomenAtlas 3.0; HF `AbdomenAtlas/AtlasNet` @ `fd03b410`. |
+| AtlasNet fine-tune | Dataset902, nine classes, 1 mm, focal Tversky, 2,000 epochs finished. Evaluate `ours-epoch1957`; HF `ahigazy1/adrenal-multiorgan-model`. |
 
-### Cleanup completed 2026-09-26
+- [MODEL_SPLITS.md](docs/MODEL_SPLITS.md): D997 1,082 recovered train / 57 validation; D998 1,072 reconstructed train / 56 validation. Check with `python docs/model-splits/check.py`.
+- [ABDOMENATLAS_PROVENANCE.md](docs/ABDOMENATLAS_PROVENANCE.md): AtlasNet pretraining overlaps 204 AMOS, all 30 BTCV and all 50 FLARE scans, including 53 of matched75. D997/D998 did not train on those sources; they did train on most TotalSegmentator scans.
+- Finished HF comparisons: `comparison/` (279), `comparison-external/` (AMOS300/BTCV30), `comparison-flare/` (FLARE50, D997/D998). RAOS is training-only, not a held-out benchmark.
 
-At the user's request, after checking that no training or inference jobs were active:
-- Removed the incomplete Dataset903 raw build and the disposable `/opt/atlas-check` scans.
-- SHA-256 verified all 380 CT files under `/opt/pseudo/sources` against the retained originals under `/opt/adrenal-multiorgan/data`. All matched. Replaced the duplicate files with symlinks to those originals; verified the links resolve. Keep their targets in place while using these pseudo-label source paths.
-- Recovered 26,026,690,945 file bytes (about 24.2 GiB); `df` free space increased from 179 to 204 GiB.
-- Preserved predictions, checkpoints, environments and logs. Startup metadata and the shutdown placeholder were unchanged.
-- VM cleanup log: `/var/log/adrenal-cleanup-20260926.json`. Local copy in the handoff folder: `verification/takeover-evidence/vm-cleanup-log.txt`.
-- Local cleanup removed 14 generated project Python bytecode files (275 KB). The handoff's source, history, evidence and check environment were retained.
+## Active AtlasNet inference and next step
 
-### Running commands on the VM from this Windows computer (Git Bash)
+- All 1,228 TotalSegmentator v2.0.1 scans, four model replicas; each uses three preprocessors, two exporters and two CPU threads. This is inference of the finished model.
+- Runner `gcp/atlasnet_totalseg.py`; VM `/tmp/atlasnet-totalseg.py`, Python `/opt/flare-run/.pixi/envs/default/bin/python`.
+- Checkpoint SHA-256 `f25e3161e1b1e8ea6beb289db7a0feb083d49b4ed5abde7bb7c63459861f598e` matches evaluated epoch1957 (saved counter 1958).
+- Batching check passed: 3 / 41,869,872 voxel labels changed versus stock nnU-Net. Four-case native-grid/upload smoke passed. At 04:49 UTC, 520/1,228 uploaded, GPU 100%; completion still pending at that snapshot.
+- Run root `/opt/atlasnet-totalseg`; main log `/tmp/atlasnet-totalseg.log`; per-worker logs at the run root. `complete.json` is written after all masks and remote checks succeed.
+- HF prefix: `ahigazy1/adrenal-multiorgan-model/comparison-totalseg/ours-epoch1957/`.
+- Next: [raw-reference scoring by Dataset902 split](docs/TOTALSEG_EVALUATION.md), using `evaluate_totalseg.py`. `gcp/atlasnet_totalseg_postprocess.py` is queued to wait for completion, score and checksum-verify uploaded CSVs. Staged in `/opt/atlasnet-totalseg/scoring/`; synthetic and two-case real-data checks passed. Log `/tmp/atlasnet-totalseg-postprocess.log`.
 
-- **The `gcloud` Bash wrapper picks up the Windows Store Python placeholder.** Always set:
-  `export CLOUDSDK_PYTHON="/c/Users/zakiy/AppData/Local/Google/Cloud SDK/google-cloud-sdk/platform/bundledpython/python.exe"`
-  (PowerShell's `gcloud` works without this.)
-- **Command pattern:**
-  `timeout 200 gcloud compute ssh adrenal-train --zone=us-central1-f --quiet --command="..." < /dev/null 2>/dev/null`
-  `gcloud compute ssh` uses PuTTY's `plink` here.
-  - **Host-key prompt:** it prints a host-key prompt that **eats stdin**, so never pipe a script into ssh. Instead, base64-encode it locally and decode it on the VM:
-    `B=$(base64 -w0 script.py); ... --command="echo $B | base64 -d > /tmp/s.py && sudo /opt/pseudo-env/bin/python /tmp/s.py"`
-  - **Output noise:** filter the host-key chatter with `grep -vE "host key|Plink|trust|carry on|fingerprint|ssh-ed25519|guarantee|think it is|Store key|cancels|port 22|enter \"n\"|^connection"`.
-- **Long jobs:** write a script to `/opt/<name>.sh` that logs with `exec > >(tee -a /var/log/<name>.log) 2>&1`, then start it detached:
-  `(sudo setsid nohup /opt/<name>.sh >/dev/null 2>&1 < /dev/null &)`
-- **`pkill -f` pitfall:** `pkill -f <pattern>` also matches the ssh command's own shell (exit code 128). Use a bracket pattern such as `pkill -f '[f]inetune.py build'`. Killing a parent script does not kill its multiprocessing workers; kill those too.
-- **HF inside VM jobs:** get the token from the metadata server, as `gcp/startup.sh` does. For big downloads use `hf_hub_download` / `snapshot_download` with `HF_XET_HIGH_PERFORMANCE=1` (fast). `HfFileSystem` streaming is slow.
-- **Monitoring and logs:** Cloud Logging keeps the serial console (startup scripts) after the VM stops:
-  `gcloud logging read 'resource.type="gce_instance" AND textPayload:"..."' --project=adrenal-seg`
-  **Pseudo-label monitor** (read-only, Windows PowerShell, from the handoff folder):
-  `.\.venv-check\Scripts\python.exe .\projects\adrenal-multiorgan\pseudolabels\monitor.py --instance adrenal-train --zone us-central1-f`
-- **Local Python:** use the handoff folder's `.venv-check\Scripts\python.exe`; plain `python` is the Windows Store placeholder.
+## Teacher experiments
 
-## Hugging Face storage (user is near the limit)
+- **TotalSegmentator 2.18:** 380 AMOS/BTCV/FLARE masks, D997's 66 IDs. HF dataset `ahigazy1/adrenal-pseudolabels`, prefix `pseudolabels/totalseg-2.18.0/bfece4a56f11d1f1`, commit `3421a9d`; metrics under `evaluation/`.
+- **VISTA3D:** original 380 plus all 413 RAOS masks complete. HF prefix `pseudolabels/vista3d-c6dbe159/`. RAOS: 317 cancer, 22 partial-surgery, 74 missing-organ scans; all image/label grids matched. Left/right adrenal mean Dice .620/.595; median signed volume errors −35.1%/−31.7% against RAOS labels.
+- **CTMR:** three-case RAOS trial complete and uploaded under `pseudolabels/nv-segment-ctmr-4fb8b4a6/raos-trial/`. Nine-case AMOS/BTCV/FLARE trial also complete, at `/opt/ctmr/abdominal-trial`; its upload is pending. Upstream `cb921f5c...`, weights `4fb8b4a6...`.
+- The combined 810-file teacher upload was checksum-verified at HF commit `48164b34b240caa2141aafa9830db9368a957db2`; manifest `manifests/teacher-results-20260926.json`. Handoff uploader: `ops/upload-teacher-results.py`.
+- **NV-Segment-CT points:** six-gland/three-scan automatic-versus-one-point trial complete at `/opt/nvct/`; weights `afb51518...`. Volume accuracy worsened in five of six glands. AMOS0005 left prediction 18.01 mL versus 0.67 mL reference. Geometry audit confirmed the point was inside the reference and correctly transformed. Class-plus-point mode merges automatic/interactive predictions; it did not refine an imported CTMR mask. Inspection evidence is in handoff `verification/takeover-evidence/nvct-point-inspection.md`. Upload pending. Earlier `ops/vista-point-trial.py` was never launched.
+- CT supports point prompts; CTMR officially does not. Reference-assisted results must be distinguished from automatic inference. Both NVIDIA teachers have source-dataset exposure; these trials do not establish unseen-data performance.
 
-- **Private:** 818 GB = 587 GB current files + 231 GB history, mostly overwritten checkpoints: `adrenal-atlas-checkpoints` 116 GB, `aa11-*-08mm-checkpoints` 37 GB, `adrenal-multiorgan-model` 25 GB.
-- **Public:** 2.25 TB, mostly current files (`adrenal-atlas-preprocessed` 1.33 TB, `adrenal-atlas-aligned` 493 GB).
-- **`testing`:** 12 GB, all history.
-- **Pending decision:** squashing history (`HfApi.super_squash_history`) or deleting anything is irreversible and awaits the user. The fine-tune trainer uploads every 250 epochs to limit growth.
-- **Getting storage figures:** `usedStorage` works through the raw API (`/api/models/<id>?expand[]=usedStorage`), not through `huggingface_hub`'s listing.
+## D997 fine-tune: paused
+
+Decided: D997 at 1.5 mm; CE + focal Tversky (FP .4 / FN .6, exponent .75); stock augmentation without mirroring; include TotalSegmentator; RAOS as a normal labelled, training-only dataset; one run.
+
+Open: sampling ratios, final validation/test membership, teacher choice for missing organs, epoch budget and checkpoint selection. Volume-aware full-volume validation has been discussed, not implemented or approved as the selection rule.
+
+`finetune.py`, `trainers/d997_finetune.py` and `gcp/finetune_startup.sh` are a paused proposal. The builder currently handles TS/AMOS/BTCV/FLARE, not RAOS. It uses Dataset902 validation/test membership and keeps truncated glands under its revised exclusion rule. This is not the final agreed design.
+
+Before a build/run:
+1. Resolve existing-output handling and record the code revision in the build marker.
+2. Score only real-label organs for each source.
+3. Correct provenance for scans rejected during the initial audit.
+4. Set loader environment variables, agree epoch budget, and remove any smoke-model output before training.
+5. Restore training startup metadata and remove the shutdown shim described below.
+
+The abandoned Dataset903 build was removed during approved cleanup on September 26. No new training run has started.
+
+## VM and commands
+
+- Account `zakiyaferdousi@gmail.com`, project `adrenal-seg`; VM `adrenal-train`, zone `us-central1-f`, g4-standard-48 Spot: RTX PRO 6000 96 GB, 48 vCPUs, 176 GiB RAM, 500 GB retained disk. Last checked RUNNING and billing. Reuse this VM; disk quota is exhausted.
+- PowerShell SSH: `gcloud compute ssh adrenal-train --zone=us-central1-f --project=adrenal-seg --quiet --command="..."`. Upload scripts with `gcloud compute scp`; avoid nested Python quoting or piping scripts through PuTTY stdin.
+- Git Bash needs `CLOUDSDK_PYTHON="/c/Users/zakiy/AppData/Local/Google/Cloud SDK/google-cloud-sdk/platform/bundledpython/python.exe"`. PowerShell does not.
+- Detached jobs: `(sudo setsid nohup <command> >/tmp/<job>.log 2>&1 < /dev/null &)`. An SSH monitor disconnect does not stop these jobs. Killing a parent does not kill its worker processes.
+- Startup metadata still points to the pseudo-label script. Original training startup is in handoff `ops/pseudo-on-adrenal-train/original-training-startup.sh`; D997 uses `gcp/finetune_startup.sh` with a pinned revision.
+- `/root/.local/bin/shutdown` is a placeholder installed at the user's request to keep the VM running. Restore real shutdown behavior before an approved training launch. Do not change the current inference lifecycle silently.
+- HF authentication: Secret Manager `HF_TOKEN`, readable by the VM service account. Use metadata-server credentials as in `gcp/startup.sh`; hold the token in memory. `HF_XET_HIGH_PERFORMANCE=1` speeds large downloads.
+- Local Python: handoff `.venv-check/Scripts/python.exe`; plain `python` is a Windows Store alias.
+
+| VM path | Contents |
+|---|---|
+| `/opt/adrenal-multiorgan` | Frozen training checkout and original data, Dataset902, checkpoints, RAOS and D997. Preserve. |
+| `/opt/flare-run` | Comparison checkout and pixi runtime used for AtlasNet inference. |
+| `/opt/finetune-run` | Paused fine-tune checkout. |
+| `/opt/pseudo`, `/opt/pseudo-run`, `/opt/pseudo-env` | TotalSegmentator outputs, code and runtime. |
+| `/opt/vista` | VISTA3D environment/bundle, original `out/`, RAOS `raos/`. |
+| `/opt/ctmr`, `/opt/nvct` | Isolated NVIDIA trial runtimes and evidence. |
+
+Approved cleanup removed the abandoned Dataset903 build and disposable `/opt/atlas-check` scans; replaced 380 checksum-identical duplicate CTs with symlinks to retained originals, reclaiming ~24.2 GiB. Preserve their targets. Log `/var/log/adrenal-cleanup-20260926.json`; handoff copy `verification/takeover-evidence/vm-cleanup-log.txt`.
+
+HF storage was near its limit at the last audit, mostly checkpoint history. No squashing/deletion is approved. Use raw API `usedStorage` for new audits; old usage snapshots are not current quotas.
