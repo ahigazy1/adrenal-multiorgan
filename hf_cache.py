@@ -356,21 +356,16 @@ def publish_cache(hub: Hub, data: Path, value: dict) -> None:
     log.info('Published complete preprocessing cache: %s', value['content_id'])
 
 
-def ensure_prepared(data: Path, root: Path = ROOT, hub=None, publish: bool = True) -> None:
-    """Make the prepared data available locally. With publish=False nothing is uploaded here: training does not
-    need the upload, so startup.sh runs `publish` in the background while the GPU trains."""
+def ensure_prepared(data: Path, root: Path = ROOT, hub=None) -> None:
+    """Make the prepared data available locally. Nothing is uploaded here: training does not need the upload,
+    so startup.sh runs `publish` in the background while the GPU trains."""
     data.mkdir(parents=True, exist_ok=True)
     recipe = recipe_id(root)
     hub = hub or Hub(os.environ.get('ADRENAL_CACHE_REPO', CACHE_REPO), 'dataset')
     for marker in (data / '.prepared', data / '.preprocessed-local.json'):
         if marker.is_file() and marker.stat().st_size:
             value = check_manifest(json.loads(marker.read_text()), 'preprocessed', recipe)
-            if publish:
-                log.info('Checking locally completed preprocessing')
-                verify_local(data, value)
             cache_files(data)  # every expected file is present; same disk, so no full re-hash on each start
-            if publish:
-                publish_cache(hub, data, value)
             write_json(data / '.prepared', value)
             return
     revision, entries = hub.info()
@@ -387,8 +382,6 @@ def ensure_prepared(data: Path, root: Path = ROOT, hub=None, publish: bool = Tru
         subprocess.run(['bash', str(root / 'prepare.sh'), str(data)], cwd=root, check=True)
         value = build_cache_manifest(data, recipe)
         write_json(data / '.preprocessed-local.json', value)
-        if publish:
-            publish_cache(hub, data, value)
     write_json(data / '.prepared', value)
     log.info('Verified preprocessing is ready for training')
 
@@ -462,7 +455,7 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     if args.action == 'ensure':
-        ensure_prepared(args.data.resolve(), publish=False)
+        ensure_prepared(args.data.resolve())
     else:
         publish_prepared(args.data.resolve())
 

@@ -1,6 +1,6 @@
 """Compare models on the 279 held-out test scans (run on any CUDA machine, e.g. a Colab A100).
 
-    python compare.py ours atlasnet labmate997 labmate998      # or a subset; finished scans are skipped
+    python compare.py ours atlasnet labmate997-fixed labmate998     # or a subset; finished scans are skipped
 
 For every model: download it from Hugging Face, segment the test scans with nnU-Net's own predictor
 (no mirroring, tile step 0.5, several patches per network call: batched_predictor.py), rename its labels to our nine organs, score with evaluate.py and upload
@@ -40,14 +40,12 @@ D998 = 'Dataset998_TotalSeg66classes/nnUNetTrainer_2000epochs_NoMirroring__nnUNe
 # model -> Hugging Face repo, repo type, folder in the repo, fold, checkpoint
 MODELS = {'ours': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.pth'),
           'ours-epoch1957': (MODEL_REPO, 'model', MODEL_FOLDER.name, 0, 'checkpoint_best.pth'),  # best of the finished run; 'ours' holds epoch 1300
-          'labmate997': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth'),
           'labmate998': ('ahigazy1/AdrenalSeg-Sources', 'dataset', D998, 0, 'checkpoint_final.pth'),
           'atlasnet': (ATLASNET['repo'], 'model', None, 'all', 'checkpoint_final.pth'),
-          'labmate997-reoriented': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth'),
           'labmate997-fixed': ('ahigazy1/adrenal-training-models', 'model', 'labmate', 0, 'checkpoint_final.pth')}
 # labmate997's plans.json names the reader NibabelIO, which does not reorient: the AMOS and BTCV scans (not stored RAS)
 # reach the network in another orientation. The reorienting reader every other model uses fixes that. nnU-Net takes
-# the reader from the plans, so it is set there ('labmate997-reoriented' set it in dataset.json, which is ignored).
+# the reader from the plans, so it is set there.
 READER = {'labmate997-fixed': 'NibabelIOWithReorient'}
 NAMES = {'adrenal_left': ['adrenal_left', 'adrenal_gland_left'], 'adrenal_right': ['adrenal_right', 'adrenal_gland_right'],
          'inferior_vena_cava': ['inferior_vena_cava', 'postcava']}  # other organs have the same name everywhere
@@ -221,15 +219,6 @@ def load_predictor(name, model, fold, checkpoint):
     configuration = predictor.configuration_manager.configuration
     if configuration['resampling_fn_probabilities'] == 'resample_data_or_seg_to_shape':
         configuration['resampling_fn_probabilities'] = RESAMPLING['resampling_fn_probabilities']
-    if os.environ.get('ADRENAL_GPU_RESAMPLE') and configuration['resampling_fn_probabilities'] in (
-            'resample_logits_to_shape_sitk', 'resample_data_or_seg_to_shape'):
-        # network output -> labels on the GPU: nnU-Net's default resampling (what the SimpleITK function reproduces),
-        # one class at a time with a running argmax; checked on real scans: 0 labels changed (gpu_logits_argmax.py)
-        configuration['resampling_fn_probabilities'] = 'resample_logits_argmax_cucim'
-    if configuration['resampling_fn_data'] == 'resample_data_or_seg_to_shape' and os.environ.get('ADRENAL_GPU_RESAMPLE'):
-        # the CT on the GPU: a cuCIM port of nnU-Net's own scipy resampler (same interpolation and edge mode, float32),
-        # vendored from adrenalSegmentator; the same kwargs as the plans
-        configuration['resampling_fn_data'] = 'resample_data_or_seg_to_shape_cucim'
     return predictor
 
 
@@ -407,26 +396,13 @@ def main_then_release():
     reason = 'finished'
     try:
         main()
-    except KeyboardInterrupt:
-        reason = 'interrupted (SIGINT)'
-        raise
-    except SystemExit as stop:
-        reason = f'sys.exit({stop.code!r})'
-        raise
     except BaseException as error:
-        reason = f'crashed: {error!r}'
+        reason = ('interrupted (SIGINT)' if isinstance(error, KeyboardInterrupt) else
+                  f'sys.exit({error.code!r})' if isinstance(error, SystemExit) else f'crashed: {error!r}')
         raise
     finally:
         release_runtime(reason)
 
 
-def self_check():
-    import numpy as np
-    lut = np.zeros(256, np.uint8)
-    lut[[8, 9, 50]] = [2, 1, 7]
-    assert lut[np.array([0, 8, 9, 50, 60])].tolist() == [0, 2, 1, 7, 0]
-
-
 if __name__ == '__main__':
-    self_check()
     main_then_release()

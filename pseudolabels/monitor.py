@@ -29,6 +29,7 @@ from hf_cache import digest, verify_remote
 
 EXPECTED = {'amos': 300, 'btcv': 30, 'flare': 50}
 REPO = 'ahigazy1/adrenal-pseudolabels'
+PROJECT = 'adrenal-seg'
 
 
 def gcloud(*args):
@@ -46,14 +47,14 @@ def gcloud(*args):
     return result.stdout.strip()
 
 
-def token_for(project, secret):
+def token_for():
     token = os.environ.get('HF_TOKEN', '').strip()
     if token:
         return token, 'HF_TOKEN environment variable'
-    token = gcloud('secrets', 'versions', 'access', 'latest', f'--secret={secret}', f'--project={project}')
+    token = gcloud('secrets', 'versions', 'access', 'latest', '--secret=HF_TOKEN', f'--project={PROJECT}')
     if not token:
         raise RuntimeError('HF_TOKEN secret is empty')
-    return token, f'Secret Manager ({project}/{secret}); memory only'
+    return token, f'Secret Manager ({PROJECT}/HF_TOKEN); memory only'
 
 
 def get_json(path, token):
@@ -81,36 +82,6 @@ def local_hashes():
 
 def matches_code(recipe, hashes):
     return all(recipe.get(key) in values for key, values in hashes.items())
-
-
-def load_state(path, repo, project, instance, hashes):
-    if not path.exists():
-        return None
-    try:
-        saved = json.loads(path.read_text(encoding='utf-8'))
-    except (ValueError, OSError):
-        raise RuntimeError('Cannot read monitor state; select a new --state file or restore the bookmark') from None
-    # A bookmark from another VM/repo or older runner code is stale: follow the current code's run instead.
-    if (any(saved.get(key) != value for key, value in [('repo', repo), ('project', project), ('instance', instance)])
-            or not all(set(saved.get('code_hashes', {}).get(key, [])) & values for key, values in hashes.items())):
-        return None
-    prefix = saved.get('prefix', '')
-    if not re.fullmatch(r'pseudolabels/totalseg-[^/]+/[0-9a-f]{16}', prefix):
-        raise RuntimeError('Invalid saved monitor prefix')
-    return prefix
-
-
-def save_state(path, repo, project, instance, hashes, snapshot):
-    if not snapshot['hf'].get('prefix'):
-        return
-    value = {'repo': repo, 'project': project, 'instance': instance,
-             'prefix': snapshot['hf']['prefix'], 'checked_at': snapshot['checked_at'],
-             'last_verified': snapshot['hf']['verified'],
-             'code_hashes': {key: sorted(values) for key, values in hashes.items()}}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + '.tmp')
-    temporary.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
-    temporary.replace(path)
 
 
 def progress(manifest, entries, prefix):
@@ -167,8 +138,8 @@ def hf_snapshot(token, repo, selected_prefix, hashes):
             'url': f'https://huggingface.co/datasets/{repo}/tree/{revision}/{matching[0]["prefix"]}'}
 
 
-def cloud_snapshot(project, instance, zone):
-    instances = json.loads(gcloud('compute', 'instances', 'list', f'--project={project}',
+def cloud_snapshot(instance, zone):
+    instances = json.loads(gcloud('compute', 'instances', 'list', f'--project={PROJECT}',
                                   f'--filter=name={instance}', '--format=json'))
     instances = [item for item in instances if item['name'] == instance
                  and (not zone or item['zone'].rsplit('/', 1)[-1] == zone)]
@@ -182,10 +153,10 @@ def cloud_snapshot(project, instance, zone):
     try:
         if vm['status'] == 'RUNNING':
             raw = gcloud('compute', 'instances', 'get-serial-port-output', instance,
-                         f'--project={project}', f'--zone={zone}', '--port=1')
+                         f'--project={PROJECT}', f'--zone={zone}', '--port=1')
         else:
             query = f'resource.type=gce_instance AND resource.labels.instance_id="{vm["id"]}" AND logName:serial_port_1_output'
-            rows = json.loads(gcloud('logging', 'read', query, f'--project={project}',
+            rows = json.loads(gcloud('logging', 'read', query, f'--project={PROJECT}',
                                     '--freshness=7d', '--limit=100', '--order=desc', '--format=json'))
             raw = '\n'.join(row.get('textPayload', '') for row in reversed(rows))
         lines = [line for line in raw.splitlines()
@@ -225,51 +196,38 @@ def render(snapshot):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--project', default='adrenal-seg')
     parser.add_argument('--instance', default='adrenal-pseudo')
     parser.add_argument('--zone')
-    parser.add_argument('--secret', default='HF_TOKEN')
-    parser.add_argument('--repo', default=REPO)
     parser.add_argument('--prefix', help='Explicit recipe prefix; otherwise match local runner/runtime/requirements hashes')
-    parser.add_argument('--state', type=Path, default=ROOT / '.pseudolabel-monitor.json',
-                        help='Local run bookmark, saved atomically without credentials')
     parser.add_argument('--interval', type=int, default=60)
     parser.add_argument('--once', action='store_true')
-    parser.add_argument('--json', action='store_true', help='One JSON snapshot per poll')
     parser.add_argument('--no-cloud', action='store_true', help='Skip VM/log queries (Secret Manager authentication still works)')
     args = parser.parse_args()
     if args.interval < 10:
         parser.error('--interval must be at least 10 seconds')
-    for value in (args.project, args.instance, args.secret, args.zone or 'unset'):
+    for value in (args.instance, args.zone or 'unset'):
         if not re.fullmatch(r'[A-Za-z0-9_-]+', value):
-            parser.error('Project, instance, secret and zone must be simple identifiers')
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repo):
-        parser.error('--repo must be owner/name')
+            parser.error('Instance and zone must be simple identifiers')
     if args.prefix and not re.fullmatch(r'pseudolabels/totalseg-[^/]+/[0-9a-f]{16}', args.prefix):
         parser.error('--prefix must be pseudolabels/totalseg-VERSION/RECIPE_HASH')
-    token, auth_source = token_for(args.project, args.secret)
-    if not args.json:
-        print(f'Read-only monitor. Authentication: {auth_source}. Ctrl+C to stop.', flush=True)
+    token, auth_source = token_for()
+    print(f'Read-only monitor. Authentication: {auth_source}. Ctrl+C to stop.', flush=True)
     hashes = local_hashes()
-    prefix = args.prefix or load_state(args.state, args.repo, args.project, args.instance, hashes)
+    prefix = args.prefix
     while True:
         snapshot = {'checked_at': datetime.now(timezone.utc).isoformat(timespec='seconds')}
         try:
-            snapshot['hf'] = hf_snapshot(token, args.repo, prefix, hashes)
+            snapshot['hf'] = hf_snapshot(token, REPO, prefix, hashes)
             # Stay on the same recipe even if another run appears later.
             prefix = snapshot['hf'].get('prefix', prefix)
-            save_state(args.state, args.repo, args.project, args.instance, hashes, snapshot)
         except (RuntimeError, ValueError, KeyError, TypeError) as error:
             snapshot['hf'] = {'state': 'ERROR', 'error': str(error)}
         if not args.no_cloud:
             try:
-                snapshot['vm'] = cloud_snapshot(args.project, args.instance, args.zone)
+                snapshot['vm'] = cloud_snapshot(args.instance, args.zone)
             except (RuntimeError, ValueError, KeyError) as error:
                 snapshot['vm'] = {'status': 'UNAVAILABLE', 'error': str(error)}
-        if args.json:
-            print(json.dumps(snapshot), flush=True)
-        else:
-            render(snapshot)
+        render(snapshot)
         if args.once or snapshot['hf']['state'] == 'COMPLETE':
             return 1 if snapshot['hf']['state'] == 'ERROR' else 0
         time.sleep(args.interval)

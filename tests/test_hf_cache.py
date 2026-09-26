@@ -143,25 +143,13 @@ class CacheTests(unittest.TestCase):
         self.assertIn('preprocessed/**/*.tar filter=lfs', attributes)
         self.assertEqual(list(self.hub.commits[0][0]), ['.gitattributes'])
 
-    def test_ensure_first_build_is_published_before_ready_marker(self):
-        atlas, _, _, _ = self.bundle()
-        with patch.object(cache, 'recipe_id', return_value='recipe'), \
-                patch.object(cache, 'ATLASNET_SHA256', cache.file_info(atlas)['sha256']), \
-                patch.object(cache.subprocess, 'run') as run:
-            cache.ensure_prepared(self.data, self.root, self.hub)
-            run.assert_called_once_with(['bash', str(self.root / 'prepare.sh'), str(self.data)],
-                                        cwd=self.root, check=True)
-        self.assertIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
-        self.assertTrue((self.data / '.prepared').exists())
-        self.assertTrue((self.data / '.preprocessed-local.json').exists())
-
     def test_training_can_start_before_the_upload_and_publish_finishes_it_later(self):
         atlas, _, _, _ = self.bundle()
         with patch.object(cache, 'recipe_id', return_value='recipe'),                 patch.object(cache, 'ATLASNET_SHA256', cache.file_info(atlas)['sha256']),                 patch.object(cache.subprocess, 'run'):
-            cache.ensure_prepared(self.data, self.root, self.hub, publish=False)
+            cache.ensure_prepared(self.data, self.root, self.hub)
             self.assertTrue((self.data / '.prepared').exists())
             self.assertNotIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
-            cache.ensure_prepared(self.data, self.root, self.hub, publish=False)  # a restart: still no upload, no rebuild
+            cache.ensure_prepared(self.data, self.root, self.hub)  # a restart: still no upload, no rebuild
             cache.publish_prepared(self.data, self.hub)
         self.assertIn(cache.complete_path('recipe'), self.hub.revisions[self.hub.head])
 
@@ -288,7 +276,7 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(json.loads((fresh / '.prepared').read_text())['content_id'], value['content_id'])
         cache.verify_local(fresh, value)
 
-    def test_ensure_upload_retry_does_not_rebuild(self):
+    def test_ensure_local_build_marker_does_not_rebuild(self):
         atlas, _, _, _ = self.bundle()
         with patch.object(cache, 'ATLASNET_SHA256', cache.file_info(atlas)['sha256']):
             value = cache.build_cache_manifest(self.data, 'recipe')

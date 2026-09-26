@@ -50,15 +50,15 @@ With a normal Python install, from the active repository:
 python pseudolabels/monitor.py
 ```
 
-Add `--once` for one check, `--json` for machine-readable output, or `--interval 30` for 30-second polling (default 60). Ctrl+C stops the monitor without affecting inference. `--no-cloud` skips VM/log requests. No uv installation is necessary.
+Add `--once` for one check or `--interval 30` for 30-second polling (default 60). Ctrl+C stops the monitor without affecting inference. `--no-cloud` skips VM/log requests. No uv installation is necessary.
 
 The monitor displays checksum-matched remote uploads out of 380 and per-source counts, VM status and recent serial/Cloud Logging messages. Case-start/case-done logs show work between commits; a case-done log is not an uploaded result. Upload progress advances after the first case, then after batches of 48. A stopped VM is never treated as successful completion without the full verified manifest. No current manifest displays WAITING_FOR_MANIFEST, not completion.
 
-The monitor matches the local runner/runtime/requirements hashes, accepting Git's LF/CRLF conversion, so it does not mix old recipes. Once selected, the run prefix is atomically bookmarked in `.pseudolabel-monitor.json` (gitignored, no credentials). Rerun the same command to resume monitoring. Every check rereads remote truth rather than trusting cached counts. Use `--state other-file.json` for a separate run, or `--prefix pseudolabels/totalseg-2.18.0/RECIPE_HASH` to follow an older recipe explicitly after changing local code.
+The monitor matches the local runner/runtime/requirements hashes, accepting Git's LF/CRLF conversion, so it does not mix old recipes. Rerun the same command to resume monitoring. Every check rereads remote truth rather than trusting cached counts. Use `--prefix pseudolabels/totalseg-2.18.0/RECIPE_HASH` to follow an older recipe explicitly after changing local code.
 
 Inference resumes from hash-verified remote manifest entries. Source downloads and the boot disk are retained. An interrupted, uncommitted batch may be recomputed (up to 25 cases); that is intentional rather than trusting unchecked local files. Pinned startup code prevents automatic upgrades from changing recipe identity on reboot. Restart monitoring independently of restarting inference; the monitor itself never restarts the VM.
 
-Monitor tests: `python pseudolabels/check_monitor.py`. They cover partial/completed manifests, corrupt payloads, false completion, saved-run restart and refreshed remote counts after reconnecting.
+Monitor tests: `python pseudolabels/check_monitor.py`. They cover partial/completed manifests, corrupt payloads, false completion and refreshed remote counts after reconnecting.
 
 ## Public output storage
 
@@ -66,4 +66,4 @@ The user requested public pseudo-label uploads while private storage is constrai
 
 You can change this same dataset to private later in Hugging Face settings. The runner and monitor accept either visibility for this output repository without changing its identity, prefix or progress. Authentication remains available through Secret Manager. Repository creation with exist_ok does not change an existing repository's visibility.
 
-Destination checks: six monitor tests passed, pseudo-label regression checks passed, Bash syntax and git diff --check passed. The cache suite passed 27 tests; one pre-existing symlink test is blocked by Windows privilege error 1314. No training or inference VM was launched.
+Destination checks: five monitor tests passed, pseudo-label regression checks passed, Bash syntax and git diff --check passed. The cache suite passed 26 tests; one pre-existing symlink test is blocked by Windows privilege error 1314. No training or inference VM was launched.

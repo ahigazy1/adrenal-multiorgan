@@ -1,7 +1,4 @@
 """Offline monitor integrity and restart checks; standard library only."""
-import json
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -46,23 +43,6 @@ class MonitorChecks(unittest.TestCase):
         manifest['scans_total'] = 793
         with self.assertRaises(RuntimeError):
             m.progress(manifest, entries, prefix)
-
-    def test_monitor_restart_pins_run_without_credentials(self):
-        hashes = {'code': {'runner'}, 'runtime_code': {'runtime'}, 'requirements': {'requirements'}}
-        manifest, entries, prefix = fixture({'amos': 26})
-        snapshot = {'checked_at': 'now', 'hf': m.progress(manifest, entries, prefix)}
-        with TemporaryDirectory() as temporary:
-            path = Path(temporary) / 'state.json'
-            self.assertIsNone(m.load_state(path, 'repo', 'project', 'instance', hashes))
-            m.save_state(path, 'repo', 'project', 'instance', hashes, snapshot)
-            self.assertEqual(m.load_state(path, 'repo', 'project', 'instance', hashes), prefix)
-            text = path.read_text()
-            self.assertNotIn('token', text.lower())
-            self.assertEqual(json.loads(text)['last_verified'], 26)
-            self.assertFalse(path.with_name('state.json.tmp').exists())
-            changed = {**hashes, 'code': {'new-code'}}
-            self.assertIsNone(m.load_state(path, 'repo', 'project', 'instance', changed))
-            self.assertIsNone(m.load_state(path, 'other-repo', 'project', 'instance', hashes))
 
     def test_reconnect_uses_remote_manifest_not_saved_count(self):
         manifest, entries, prefix = fixture({'amos': 51})
