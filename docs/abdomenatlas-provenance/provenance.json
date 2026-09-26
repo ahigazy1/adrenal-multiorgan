@@ -1,0 +1,53 @@
+{
+  "recovered_date": "2026-09-25",
+  "source_folder": "C:\\Users\\ahiga\\Desktop\\AdrenalGold",
+  "atlas_dataset_named_in_scripts": "BodyMaps/_AbdomenAtlas1.1Mini",
+  "atlas_revision": "not pinned in recovered scripts",
+  "source_files": {
+    "atlas_overlap_shards01_05.csv": {
+      "original_path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\atlas_overlap.csv",
+      "sha256": "2fcf2ec9e2700949562d1f3aa5517319c2b9eeeab09d6ec2d01d6c7edfac3134",
+      "bytes": 8091
+    },
+    "atlas_overlap_shard01.csv": {
+      "original_path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\atlas_shard01_overlap.csv",
+      "sha256": "67261d521c21d660ec06285f79ec8cc2dd677ae1a8d2736768481b8cd80111a5",
+      "bytes": 1666
+    },
+    "atlas_overlap_shards06_10.csv": {
+      "original_path": "C:\\Users\\ahiga\\Downloads\\atlas_overlap_0619_shards1to10inclusive.csv",
+      "sha256": "312ac136899e73e174dd53b25519edb2cd416358067377ed979238ff087c0cb6",
+      "bytes": 9138
+    },
+    "atlas_overlap_export_up_to_shard13.csv": {
+      "original_path": "C:\\Users\\ahiga\\Downloads\\atlas_overlap_0619_up to shard 13.csv",
+      "sha256": "77d489bcd45ddd888f4da6a7873698398e9578e3512d30cfd592924e53923cea",
+      "bytes": 9875
+    },
+    "atlas_match3.py": {
+      "original_path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\.atlas_match3.py",
+      "sha256": "bbb1745277f1413f535287377de3f02550ab1e12210d911a449caa94ccb40036",
+      "bytes": 4330
+    },
+    "atlas_pipeline.py": {
+      "original_path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\.atlas_pipeline.py",
+      "sha256": "ac63ee731d8ac8806d21d77cb491ef8038fa2de9c511c199f5619276f1c8d2ad",
+      "bytes": 4660
+    },
+    "atlas_pipeline.log": {
+      "original_path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\.atlas_pipeline.log",
+      "sha256": "ceff3f17290df6ed9b7a99f7bae9c838d7cc6bdfd0220f1fc132743cc319b65b",
+      "bytes": 478
+    },
+    "atlas_overlap_colab.ipynb": {
+      "original_path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\atlas_overlap_colab.ipynb",
+      "sha256": "f54e4a149a1f5e532bba03bad0beb27e00dd3cab54c1db414fb3ea15e26d7968",
+      "bytes": 9606
+    }
+  },
+  "large_cache_not_copied": {
+    "path": "C:\\Users\\ahiga\\Desktop\\AdrenalGold\\.atlas_std_cache.pkl",
+    "bytes": 169740439
+  },
+  "scope": "Recover existing image-overlap analysis; no CT matching was rerun and no GPU or cloud job was launched."
+}

@@ -1,0 +1,59 @@
+{
+  "atlas_collection": "BodyMaps/_AbdomenAtlas1.1Mini",
+  "total_recorded_matches": 279,
+  "by_dataset": {
+    "AMOS": {
+      "exact": 81,
+      "shape+corr": 117,
+      "corr-only": 1
+    },
+    "BTCV": {
+      "exact": 30,
+      "shape+corr": 0,
+      "corr-only": 0
+    },
+    "FLARE": {
+      "exact": 0,
+      "shape+corr": 50,
+      "corr-only": 0
+    }
+  },
+  "by_method": {
+    "exact": 111,
+    "shape+corr": 167,
+    "corr-only": 1
+  },
+  "by_shard_with_positive_rows": {
+    "shard01": 29,
+    "shard02": 25,
+    "shard03": 22,
+    "shard04": 23,
+    "shard05": 27,
+    "shard06": 15,
+    "shard07": 37,
+    "shard08": 38,
+    "shard09": 26,
+    "shard10": 26,
+    "shard11": 11
+  },
+  "correlation_only_candidates": [
+    {
+      "shard": "shard03",
+      "gold_dataset": "AMOS",
+      "gold_scan": "amos_0199.nii.gz",
+      "atlas_bdmap_id": "BDMAP_00001053",
+      "match_type": "corr-only",
+      "corr32": "0.9985",
+      "evaluation_case_id": "amos_0199",
+      "evidence_status": "correlation_only_candidate",
+      "source_export": "atlas_overlap_shards01_05.csv"
+    }
+  ],
+  "coverage_status": "incomplete; no complete processed-shard inventory or negative-match manifest recovered",
+  "not_established": [
+    "complete AbdomenAtlas source attribution",
+    "AtlasNet checkpoint training/validation membership",
+    "AbdomenAtlas 3.0 cross-version identity",
+    "independence of scans without a recorded match"
+  ]
+}
