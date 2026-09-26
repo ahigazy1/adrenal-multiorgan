@@ -2,6 +2,8 @@
 
 Fine-tuning AtlasNet (nnU-Net) to segment the adrenal glands, kidneys, liver, spleen, aorta, inferior vena cava and pancreas on CT, from four public datasets: TotalSegmentator v2, AMOS22 CT, BTCV and FLARE22. The full specification and the reasons behind each choice are in [PLAN.md](PLAN.md).
 
+D997/D998 historical training and validation membership, recovered case lists, and source evidence are in [docs/MODEL_SPLITS.md](docs/MODEL_SPLITS.md). D997 has a corroborated 1,082-case training list and 57 verified validation IDs; D998 has 56 verified validation IDs but its exact training list remains unknown.
+
 The work is a short sequence of steps. Each step is one small script that logs what it did and records the exact inputs it used. Everything runs on one Google Cloud machine (one NVIDIA RTX PRO 6000, 48 vCPUs), started with one command; each script can also be run by hand.
 
 | Step | Script | What it does | Status (September 19, 2026) |

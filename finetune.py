@@ -14,7 +14,8 @@ the scan edge are correctly labelled partial glands and are kept.
 Split: Dataset902's (the AtlasNet fine-tune), unchanged, so the two fine-tunes are directly comparable: its 279 test
 scans (whose AMOS/BTCV/FLARE part is the 75-scan set every model was compared on) and its fold-0 validation scans.
 Scans that Dataset902 excluded and the revised rule keeps go to training only. D997 itself was pretrained on most
-TotalSegmentator scans (its case list was not recorded), so test results on TotalSegmentator scans are reported apart.
+TotalSegmentator scans, so test results on TotalSegmentator scans are reported apart. Recovered historical split
+evidence and confidence labels are in docs/MODEL_SPLITS.md; these do not change the Dataset902/903 split.
 """
 import argparse
 import csv
@@ -199,7 +200,7 @@ def write_provenance(data, scanned, old_role, new):
             'atlasnet_finetune': old_role.get(name, 'excluded'),  # Dataset902: excluded = its stricter rule
             'd997_finetune': new[name]['role'] if name in new else 'excluded (fragmented, left/right or > 5 mm)',
             'd997_finetune_exclusion': new.get(name, {}).get('reason', ''),
-            'd997_d998_pretraining': 'TotalSegmentator v2 subset, case list not recorded' if not labelled else 'not recorded',
+            'd997_d998_pretraining': 'See docs/model-splits: D997 recovered membership; D998 validation only; not joined here' if not labelled else 'not recorded',
             'comparison_test279': 'yes' if old_role.get(name) == 'test' else '',
             'comparison_matched75': 'yes' if old_role.get(name) == 'test' and labelled else '',
             'comparison_external330': 'yes' if r['source'] in ('amos', 'btcv') else '',
@@ -208,9 +209,9 @@ def write_provenance(data, scanned, old_role, new):
     (data / 'provenance.json').write_text(json.dumps({
         'rows': 'provenance.csv: one row per scan read by cohort_scan.py (TotalSegmentator v2.0.1, AMOS22 CT, BTCV, FLARE22)',
         'models': {
-            'D997': {'weights': D997, 'training_data': 'Dataset997_ChestAbd, 1,139 TotalSegmentator scans (1,082 train / 57 validation); case list not recorded'},
+            'D997': {'weights': D997, 'training_data': 'Dataset997_ChestAbd: 1082 train / 57 validation; training list corroborated, validation IDs verified against final run log; docs/model-splits/D997.json'},
             'D998': {'weights': 'ahigazy1/AdrenalSeg-Sources Dataset998_TotalSeg66classes fold 0 checkpoint_final',
-                     'training_data': 'Dataset998 (internally Dataset999_TotalSeg66classes), numTraining 1,128; split not recorded'},
+                     'training_data': 'Dataset998 (internally Dataset999_TotalSeg66classes), numTraining 1128; 56 validation IDs verified, 1072 train inferred, training IDs unknown; docs/model-splits/D998.json'},
             'AtlasNet': {'weights': 'AbdomenAtlas/AtlasNet fd03b410 (sha256 73ff6cb8...)', 'training_data': 'AbdomenAtlas (per model card); case list not checked against these scans'},
             'AtlasNet fine-tune (ours-epoch1957)': {'dataset': 'Dataset902_AdrenalMultiorgan', 'column': 'atlasnet_finetune'},
             'D997 fine-tune': {'dataset': DATASET, 'column': 'd997_finetune', 'split': 'Dataset902 test and validation unchanged; newly kept scans train only'}},

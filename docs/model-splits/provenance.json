@@ -1,0 +1,54 @@
+{
+  "audited_date": "2026-09-25",
+  "sources": {
+    "D997-final-training-log.txt": {
+      "source": "C:\\Users\\ahiga\\Downloads\\Dataset997_ChestAbd_ResEncUNetL_8000epochs_NoMirroring.zip!/Dataset997_ChestAbd/nnUNetTrainer_8000epochs_NoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/training_log_2026_9_14_14_39_39.txt",
+      "sha256": "3d27927fa26dbbf8b16004f46b4bf3fbc51cc38ec047fa500aa7c6a6eced4ed9"
+    },
+    "D997-dataset.json": {
+      "source": "C:\\Users\\ahiga\\Downloads\\Dataset997_ChestAbd_ResEncUNetL_8000epochs_NoMirroring.zip!/Dataset997_ChestAbd/nnUNetTrainer_8000epochs_NoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
+      "sha256": "bac7ac4c2c23b10065b39d8d483236078d1e6d5682a653f8a7b81cc15d119b6f"
+    },
+    "D997-debug.json": {
+      "source": "C:\\Users\\ahiga\\Downloads\\Dataset997_ChestAbd_ResEncUNetL_8000epochs_NoMirroring.zip!/Dataset997_ChestAbd/nnUNetTrainer_8000epochs_NoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/debug.json",
+      "sha256": "43b84474dd2c2ce143f37f4e7264e0d18e6f2d64ec78d1657d904883e1d6b469"
+    },
+    "D997-split0_training_samples.txt": {
+      "source": "C:\\Users\\ahiga\\Downloads\\AdrenalGlandVolume-main (4)\\AdrenalGlandVolume-main\\split0_training_samples.txt",
+      "sha256": "eef87dc0f911d330b5a67c8f68d158e6d8c8aeb733ce0e5b827c5c4c95b72257"
+    },
+    "D997-split0_validation_samples.txt": {
+      "source": "C:\\Users\\ahiga\\Downloads\\AdrenalGlandVolume-main (4)\\AdrenalGlandVolume-main\\split0_validation_samples.txt",
+      "sha256": "5223f1b901df43b1fa1b34b85c6db76e019c727d77013feb422c501e57de4cba"
+    },
+    "D998-validation-summary.json": {
+      "source": "C:\\Users\\ahiga\\Downloads\\models_archive\\Dataset998_TotalSeg66classes\\nnUNetTrainer_2000epochs_NoMirroring__nnUNetResEncLPlans_16GB__3d_fullres_bs8\\fold_0\\validation\\summary.json",
+      "sha256": "b1ac4b584db701b09f49c9b876679ab1e5490f90c6e954282e02a357d0eaf7d8"
+    },
+    "D998-dataset.json": {
+      "source": "C:\\Users\\ahiga\\Downloads\\models_archive\\Dataset998_TotalSeg66classes\\nnUNetTrainer_2000epochs_NoMirroring__nnUNetResEncLPlans_16GB__3d_fullres_bs8\\dataset.json",
+      "sha256": "ffbaa1b67b742fc74bedf2fd42369de03e5eed29c580f3c7c11a039dd39e1001"
+    },
+    "D998-debug.json": {
+      "source": "C:\\Users\\ahiga\\Downloads\\models_archive\\Dataset998_TotalSeg66classes\\nnUNetTrainer_2000epochs_NoMirroring__nnUNetResEncLPlans_16GB__3d_fullres_bs8\\fold_0\\debug.json",
+      "sha256": "3f28b09da9f7d7d2965001405ba1ac2a689408f6aa098b9d6edc915f414c15ab"
+    },
+    "related-older-model-split-excerpt.txt": {
+      "source": "C:\\Users\\ahiga\\Downloads\\AdrenalGlandVolume-main (4)\\AdrenalGlandVolume-main\\training_log_2025_3_14_19_38_27.txt",
+      "sha256": "e8378b6a4a0359cd82490244dd341dc3ac61bd38a02f68a353984f8dbb3b5ae7"
+    }
+  },
+  "local_checkpoint_sha256_recomputed": {
+    "D997": "0840b5b15364daa194033cef1466b522316c440cc190c80fdf7091dca02c17f7",
+    "D998": "a54d14deeb70f7b8f9e34739f50efb740a3193829e7c19325342681fc8fe396c"
+  },
+  "duplicate_D997_lists": "C:\\Users\\ahiga\\Downloads\\AdrenalGlandVolume-main (3)\\AdrenalGlandVolume-main\\segmentation_nnunet",
+  "comparison": {
+    "validation_shared": 56,
+    "D997_validation_only": [
+      "s0352"
+    ],
+    "D998_validation_only": []
+  },
+  "search_scope": "Local Downloads, Desktop and Documents filename searches, D997 ZIP inventory and correct final run log, D998 model folder contents and validation summary. No original D997/D998 splits_final.json found; downloaded splits_final*.json are unrelated BDMAP folds."
+}

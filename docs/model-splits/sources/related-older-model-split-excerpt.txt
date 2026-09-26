@@ -1,0 +1,11 @@
+Source: C:\Users\ahiga\Downloads\AdrenalGlandVolume-main (4)\AdrenalGlandVolume-main\training_log_2025_3_14_19_38_27.txt
+Source SHA256: 44845bc2bd2f279efad44d26f1d51c2ac194a5907647f854bb0537686498d1cf
+Different model: Dataset999_CustomTotalSeg / ResEncM, not the evaluated D998 checkpoint.
+
+9: 2025-03-14 19:38:35.876619: Using splits from existing split file: /home/ec2-user/SageMaker/totalseg_nnunet/nnunet_preprocessed/Dataset999_CustomTotalSeg/splits_final.json 
+10: 2025-03-14 19:38:35.876832: The split file contains 1 splits. 
+12: 2025-03-14 19:38:35.876909: This split has 1072 training and 56 validation cases. 
+19:  {'dataset_name': 'Dataset999_CustomTotalSeg', 'plans_name': 'nnUNetResEncMPlans_36G', 'original_median_spacing_after_transp': [1.5, 1.5, 1.5], 'original_median_shape_after_transp': [230, 231, 241], 'image_reader_writer': 'NibabelIOWithReorient', 'transpose_forward': [0, 1, 2], 'transpose_backward': [0, 1, 2], 'experiment_planner_used': 'nnUNetPlannerResEncM', 'label_manager': 'LabelManager', 'foreground_intensity_properties_per_channel': {'0': {'max': 10151.0, 'mean': -218.26510620117188, 'median': 12.0, 'min': -2733.0, 'percentile_00_5': -1019.0, 'percentile_99_5': 1214.0, 'std': 508.8466491699219}}} 
+24615: 2025-03-18 01:03:10.807652: Using splits from existing split file: /home/ec2-user/SageMaker/totalseg_nnunet/nnunet_preprocessed/Dataset999_CustomTotalSeg/splits_final.json 
+24616: 2025-03-18 01:03:10.807886: The split file contains 1 splits. 
+24618: 2025-03-18 01:03:10.807962: This split has 1072 training and 56 validation cases. 
