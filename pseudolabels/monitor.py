@@ -90,11 +90,10 @@ def load_state(path, repo, project, instance, hashes):
         saved = json.loads(path.read_text(encoding='utf-8'))
     except (ValueError, OSError):
         raise RuntimeError('Cannot read monitor state; select a new --state file or restore the bookmark') from None
-    if any(saved.get(key) != value for key, value in
-           [('repo', repo), ('project', project), ('instance', instance)]):
-        raise RuntimeError('Saved monitor state is for a different run context; choose a different --state file')
-    if not all(set(saved.get('code_hashes', {}).get(key, [])) & values for key, values in hashes.items()):
-        raise RuntimeError('Runner code changed since monitoring began; use --prefix to follow the old run explicitly, or a new --state file')
+    # A bookmark from another VM/repo or older runner code is stale: follow the current code's run instead.
+    if (any(saved.get(key) != value for key, value in [('repo', repo), ('project', project), ('instance', instance)])
+            or not all(set(saved.get('code_hashes', {}).get(key, [])) & values for key, values in hashes.items())):
+        return None
     prefix = saved.get('prefix', '')
     if not re.fullmatch(r'pseudolabels/totalseg-[^/]+/[0-9a-f]{16}', prefix):
         raise RuntimeError('Invalid saved monitor prefix')

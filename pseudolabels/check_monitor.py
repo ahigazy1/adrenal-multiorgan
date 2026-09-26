@@ -61,10 +61,8 @@ class MonitorChecks(unittest.TestCase):
             self.assertEqual(json.loads(text)['last_verified'], 26)
             self.assertFalse(path.with_name('state.json.tmp').exists())
             changed = {**hashes, 'code': {'new-code'}}
-            with self.assertRaises(RuntimeError):
-                m.load_state(path, 'repo', 'project', 'instance', changed)
-            with self.assertRaises(RuntimeError):
-                m.load_state(path, 'other-repo', 'project', 'instance', hashes)
+            self.assertIsNone(m.load_state(path, 'repo', 'project', 'instance', changed))
+            self.assertIsNone(m.load_state(path, 'other-repo', 'project', 'instance', hashes))
 
     def test_reconnect_uses_remote_manifest_not_saved_count(self):
         manifest, entries, prefix = fixture({'amos': 51})
