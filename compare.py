@@ -120,19 +120,21 @@ def fetch_raos():
     return raw
 
 
-def fetch_external():
+def fetch_external(dataset='external'):
     """Every labelled AMOS22 CT (300) and BTCV (30) scan from the pinned sources prepare.sh uses, labels renumbered to
     ours, named as build_dataset.py names them. No quality exclusion: the 8 scans it excluded are flagged when scoring."""
     import nibabel as nib
     import numpy as np
     from cohort_scan import LABEL_IDS
-    raw = DATA / 'external'
+    raw = DATA / dataset
     if (raw / 'done').exists():
         return raw
     sources = {'amos': ('MedOtter/amos22-ct-dataset', 'c67f7c01e66277038d87975b03b73ece489a3035',
                         [('train/labelsTr', 'train/imagesTr'), ('valid/labelsVa', 'valid/imagesVa')]),
                'btcv': ('lingheng123/btcv', 'c1728b451a00c054875a0a97d7658d1eaf8362b5',
                         [('RawData/Training/label', 'RawData/Training/img')])}
+    if dataset == 'flare':
+        sources = {'flare': ('MedOtter/FLARE22', 'ab0b99b53e2183fe59321b5888867c6c7cb0792a', [('labels', 'images')])}
     (raw / 'imagesTs').mkdir(parents=True, exist_ok=True)
     (raw / 'labelsTs').mkdir(exist_ok=True)
     for source, (repo, revision, folders) in sources.items():
@@ -145,11 +147,19 @@ def fetch_external():
             for label in sorted((root / labels).glob('*.nii.gz')):
                 case = label.name[:-7]
                 name = case if case.lower().startswith(source) else f'{source}_{case}'  # amos_0001, btcv_label0001
-                (raw / 'imagesTs' / f'{name}_0000.nii.gz').write_bytes((root / images / label.name.replace('label', 'img')).read_bytes())
+                image_name = f'{case}_0000.nii.gz' if source == 'flare' else label.name.replace('label', 'img')
+                image_path = root / images / image_name
                 reference = nib.load(label)
+                image = nib.load(image_path)
+                if image.shape != reference.shape or not np.allclose(image.affine, reference.affine, atol=1e-3):
+                    raise ValueError(f'{name}: image/reference geometry mismatch')
+                (raw / 'imagesTs' / f'{name}_0000.nii.gz').write_bytes(image_path.read_bytes())
                 nib.save(nib.Nifti1Image(lut[np.asanyarray(reference.dataobj)], reference.affine), raw / 'labelsTs' / f'{name}.nii.gz')
     scans = len(list((raw / 'labelsTs').glob('*.nii.gz')))
-    log.info('AMOS22 + BTCV: %d labelled scans', scans)
+    expected = 50 if dataset == 'flare' else 330
+    if scans != expected:
+        raise ValueError(f'{dataset}: expected {expected} labelled scans, found {scans}')
+    log.info('%s: %d labelled scans', dataset, scans)
     (raw / 'done').write_text(str(scans))
     return raw
 
@@ -159,8 +169,9 @@ def reuse_test_predictions(name, prefix):
     from huggingface_hub import CommitOperationCopy
     api = HfApi()
     have = {f.split('/')[-1] for f in api.list_repo_files(MODEL_REPO) if f.startswith(f'{prefix}/{name}/native_labels/')}
+    wanted = {p.name for p in (RAW / 'labelsTs').glob('*.nii.gz')}
     done = [f.path for f in api.list_repo_tree(MODEL_REPO, f'comparison/{name}/native_labels')
-            if f.path.split('/')[-1].startswith(('amos_', 'btcv_')) and f.path.split('/')[-1] not in have]
+            if f.path.split('/')[-1] in wanted and f.path.split('/')[-1] not in have]
     if done:
         api.create_commit(MODEL_REPO, [CommitOperationCopy(p, p.replace('comparison/', f'{prefix}/', 1)) for p in done],
                           commit_message=f'{prefix}/{name}: reuse {len(done)} test-set predictions')
@@ -319,11 +330,11 @@ def predict(name, model, output, fold, checkpoint, prefix='comparison'):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('models', nargs='+', choices=list(MODELS))
-    parser.add_argument('--dataset', choices=['test', 'raos', 'external'], default='test')
+    parser.add_argument('--dataset', choices=['test', 'raos', 'external', 'flare'], default='test')
     parser.add_argument('--skip-check', action='store_true', help='models that already passed the batching check')
     args = parser.parse_args()
     global RAW
-    prefix = {'test': 'comparison', 'raos': 'comparison-raos', 'external': 'comparison-external'}[args.dataset]
+    prefix = {'test': 'comparison', 'raos': 'comparison-raos', 'external': 'comparison-external', 'flare': 'comparison-flare'}[args.dataset]
     organs = ['--organs', *RAOS_LABELS.values()] if args.dataset == 'raos' else []
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     log.info('main_then_release is active: the Colab runtime is released on every exit path')
@@ -348,8 +359,8 @@ def main():
         threading.Thread(target=sample_memory, daemon=True).start()
     if args.dataset == 'raos':
         RAW = fetch_raos()
-    elif args.dataset == 'external':
-        RAW = fetch_external()
+    elif args.dataset in ('external', 'flare'):
+        RAW = fetch_external(args.dataset)
         for name in args.models:
             reuse_test_predictions(name, prefix)
     else:
