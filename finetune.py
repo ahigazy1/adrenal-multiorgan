@@ -11,8 +11,10 @@ Exclusion, revised from PLAN.md for segmentation training: a scan is dropped onl
 fully in view (touches no scan face) and <= 1 mL, or the left/right check failed, or slices are > 5 mm. Glands cut by
 the scan edge are correctly labelled partial glands and are kept.
 
-Split. Test: one fifth of the AMOS/BTCV/FLARE scans, stratified as build_dataset.py does; never TotalSegmentator, which
-D997 was trained on. Validation: fold 0 of five over everything else.
+Split: Dataset902's (the AtlasNet fine-tune), unchanged, so the two fine-tunes are directly comparable: its 279 test
+scans (whose AMOS/BTCV/FLARE part is the 75-scan set every model was compared on) and its fold-0 validation scans.
+Scans that Dataset902 excluded and the revised rule keeps go to training only. D997 itself was pretrained on most
+TotalSegmentator scans (its case list was not recorded), so test results on TotalSegmentator scans are reported apart.
 """
 import argparse
 import csv
@@ -29,7 +31,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-from build_dataset import case_name, five_folds, image_path, largest_component
+from build_dataset import DATASET as DATASET902, case_name, image_path, largest_component
 from cohort_scan import judge_gland, label_path, open_zip, sha256, voxel_volume_ml, write_csv
 
 DATASET = 'Dataset903_D997Finetune'
@@ -146,35 +148,75 @@ def build(args):
     # Known from the scan alone; the edge rule for small glands needs the masks and is applied per case.
     candidates = [r for r in scanned if not r['error'] and r['sides'] == 'ok' and float(r['slice_thickness_mm']) <= 5
                   and 'exclude_fragmented' not in (r['adrenal_left'], r['adrenal_right'])]
-    development, test = five_folds([r for r in candidates if r['source'] != 'ts'])[0]
-    development += [r for r in candidates if r['source'] == 'ts']
-    held_out = {case_name(r) for r in test}
-    log.info('%d scanned, %d candidates, %d in the AMOS/BTCV/FLARE test fifth', len(scanned), len(candidates), len(test))
+    old = {r['name']: r['role'] for r in csv.DictReader(open(args.data / 'nnUNet_raw' / DATASET902 / 'build_dataset.csv'))}
+    old_validation = set(json.loads((args.data / 'nnUNet_preprocessed' / DATASET902 / 'splits_final.json').read_text())[0]['val'])
+    role = {name: 'test' if r == 'test' else 'val' if name in old_validation else 'train'
+            for name, r in old.items() if r in ('train', 'test')}
+    names = set(map(case_name, candidates))
+    missing = [name for name, r in old.items() if r in ('train', 'test') and name not in names]
+    if missing:
+        raise SystemExit(f'Dataset902 scans the revised rule should keep are not candidates: {missing[:5]}')
+    log.info('%d scanned, %d candidates, %d new to training', len(scanned), len(candidates),
+             sum(case_name(r) not in role for r in candidates))
 
     with Pool(args.workers) as pool:
-        jobs = [(r, 'test' if case_name(r) in held_out else 'train', folders, args.pseudo, labels, raw) for r in candidates]
+        jobs = [(r, role.get(case_name(r), 'train'), folders, args.pseudo, labels, raw) for r in candidates]
         rows = sorted(pool.imap_unordered(build_case, jobs, chunksize=2), key=lambda r: r['name'])
     write_csv(raw / 'build_dataset.csv', rows)
     for row in rows:
         if row['role'] in ('excluded', 'failed'):
             log.info('%s %s: %s', row['role'], row['name'], row['reason'])
-    written = {r['name'] for r in rows if r['role'] == 'train'}
+    written = {r['name'] for r in rows if r['role'] in ('train', 'val')}
     (raw / 'dataset.json').write_text(json.dumps({
         'channel_names': {'0': 'CT'}, 'labels': labels, 'file_ending': '.nii.gz', 'numTraining': len(written),
         'overwrite_image_reader_writer': 'NibabelIOWithReorient'}, indent=2))  # D997's corrected (reorienting) reader
-    splits = [{'train': [n for n in map(case_name, most) if n in written], 'val': [n for n in map(case_name, fifth) if n in written]}
-              for most, fifth in five_folds(development)]
+    splits = [{'train': sorted(r['name'] for r in rows if r['role'] == 'train'),  # fold 0 is the only one trained
+               'val': sorted(r['name'] for r in rows if r['role'] == 'val')}]
     preprocessed = args.data / 'nnUNet_preprocessed' / DATASET
     preprocessed.mkdir(parents=True, exist_ok=True)
     (preprocessed / 'splits_final.json').write_text(json.dumps(splits, indent=2))
-    counts = {f"{s} {role}": sum(r['source'] == s and r['role'] == role for r in rows)
-              for s in folders for role in ('train', 'test', 'excluded', 'failed')}
+    counts = {f'{s} {part}': sum(r['source'] == s and r['role'] == part for r in rows)
+              for s in folders for part in ('train', 'val', 'test', 'excluded', 'failed')}
     log.info('fold 0: %d train, %d validation; %s', len(splits[0]['train']), len(splits[0]['val']), counts)
     if any(r['role'] == 'failed' for r in rows):
         raise SystemExit('Some cases failed; see the log. Nothing is marked finished.')
+    write_provenance(args.data, scanned, role, {r['name']: r for r in rows})
     (raw / 'build_dataset.json').write_text(json.dumps({  # written last: marks the build as finished
         'scan_csv_sha256': sha256(args.scan), 'pseudo_labels': str(args.pseudo), 'd997': D997, 'counts': counts,
         'build_dataset_csv_sha256': sha256(raw / 'build_dataset.csv')}, indent=2))
+
+
+def write_provenance(data, scanned, old_role, new):
+    """data/provenance.csv: every scanned case, its role for each model and comparison set. provenance.json: model facts."""
+    rows = []
+    for r in scanned:
+        name = case_name(r)
+        labelled = r['source'] != 'ts'
+        rows.append({
+            'name': name, 'source': r['source'], 'case': r['case'], 'official_split': r['official_split'],
+            'slice_thickness_mm': r['slice_thickness_mm'], 'dataset902_scan_decision': r['scan'],
+            'pseudo_label_totalseg218': 'yes' if labelled else 'no (own TotalSegmentator labels)',
+            'atlasnet_finetune': old_role.get(name, 'excluded'),  # Dataset902: excluded = its stricter rule
+            'd997_finetune': new[name]['role'] if name in new else 'excluded (fragmented, left/right or > 5 mm)',
+            'd997_finetune_exclusion': new.get(name, {}).get('reason', ''),
+            'd997_d998_pretraining': 'TotalSegmentator v2 subset, case list not recorded' if not labelled else 'not recorded',
+            'comparison_test279': 'yes' if old_role.get(name) == 'test' else '',
+            'comparison_matched75': 'yes' if old_role.get(name) == 'test' and labelled else '',
+            'comparison_external330': 'yes' if r['source'] in ('amos', 'btcv') else '',
+            'comparison_flare50': 'yes' if r['source'] == 'flare' else ''})
+    write_csv(data / 'provenance.csv', rows)
+    (data / 'provenance.json').write_text(json.dumps({
+        'rows': 'provenance.csv: one row per scan read by cohort_scan.py (TotalSegmentator v2.0.1, AMOS22 CT, BTCV, FLARE22)',
+        'models': {
+            'D997': {'weights': D997, 'training_data': 'Dataset997_ChestAbd, 1,139 TotalSegmentator scans (1,082 train / 57 validation); case list not recorded'},
+            'D998': {'weights': 'ahigazy1/AdrenalSeg-Sources Dataset998_TotalSeg66classes fold 0 checkpoint_final',
+                     'training_data': 'Dataset998 (internally Dataset999_TotalSeg66classes), numTraining 1,128; split not recorded'},
+            'AtlasNet': {'weights': 'AbdomenAtlas/AtlasNet fd03b410 (sha256 73ff6cb8...)', 'training_data': 'AbdomenAtlas (per model card); case list not checked against these scans'},
+            'AtlasNet fine-tune (ours-epoch1957)': {'dataset': 'Dataset902_AdrenalMultiorgan', 'column': 'atlasnet_finetune'},
+            'D997 fine-tune': {'dataset': DATASET, 'column': 'd997_finetune', 'split': 'Dataset902 test and validation unchanged; newly kept scans train only'}},
+        'comparison_sets': {'comparison_test279': 'Dataset902 test scans', 'comparison_matched75': 'AMOS/BTCV/FLARE part of the 279 (report pages 2-5)',
+                            'comparison_external330': 'all labelled AMOS + BTCV (overlaps fine-tune training)', 'comparison_flare50': 'all 50 FLARE22 (overlaps fine-tune training)'},
+        'not_used_as_test': 'RAOS: its ground truth over-segments (user); partial comparisons only'}, indent=2))
 
 
 def preprocess(args):
