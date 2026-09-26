@@ -45,7 +45,7 @@ Updated September 26, 2026. Recheck live logs before reporting progress. Histori
 
 ## D997 fine-tune: paused
 
-Decided: D997 at 1.5 mm; CE + focal Tversky (FP .4 / FN .6, exponent .75); stock augmentation without mirroring; include TotalSegmentator; RAOS as a normal labelled, training-only dataset; one run.
+Decided: D997 at 1.5 mm; CE + focal Tversky (FP .4 / FN .6, exponent .75); stock augmentation without mirroring; include TotalSegmentator; RAOS as a normal labelled dataset split 90% train / 10% validation, never test (user, Sept 26); one run.
 
 Open: sampling ratios, final validation/test membership, teacher choice for missing organs, epoch budget and checkpoint selection. Volume-aware full-volume validation has been discussed, not implemented or approved as the selection rule.
 
