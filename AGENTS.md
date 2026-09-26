@@ -62,6 +62,10 @@ The abandoned Dataset903 build was removed during approved cleanup on September 
 
 ## VM and commands
 
+**Deleted on 2026-09-26 at the user's request:** VM `adrenal-train` and its 500 GB disk. The project has no instances, disks, snapshots or images; everything needed is on HF (see "VM disk archive" below). The table and paths in this section describe that deleted VM. They remain as a recipe for a new VM, which must re-fetch data from HF. The rule "never delete adrenal-train" no longer applies.
+
+- Unfinished: CTMR automatic on all 793 scans (380 AMOS/BTCV/FLARE + 413 RAOS) and NV-Segment-CT class-plus-point adrenals were launched minutes before deletion; no results survived. The scripts are in `pseudolabels/nvidia/`, which expects the deleted VM's `/opt/ctmr`, `/opt/nvct`, `/opt/vista` and `/tmp/teachers.py` layout. NV-Segment-CT's `model.pt` is byte-identical to VISTA3D's (sha256 `c92bab26...`), so its automatic mode equals the existing VISTA3D masks. CTMR uses VISTA3D's label IDs. Its metadata lists AMOS22, BTCV, FLARE22 and TotalSegmentatorV2 in its training data.
+
 - Account `zakiyaferdousi@gmail.com`, project `adrenal-seg`; VM `adrenal-train`, zone `us-central1-f`, g4-standard-48 Spot: RTX PRO 6000 96 GB, 48 vCPUs, 176 GiB RAM, 500 GB retained disk. Last checked RUNNING and billing. Reuse this VM; disk quota is exhausted.
 - PowerShell SSH: `gcloud compute ssh adrenal-train --zone=us-central1-f --project=adrenal-seg --quiet --command="..."`. Upload scripts with `gcloud compute scp`; avoid nested Python quoting or piping scripts through PuTTY stdin.
 - Git Bash needs `CLOUDSDK_PYTHON="/c/Users/zakiy/AppData/Local/Google/Cloud SDK/google-cloud-sdk/platform/bundledpython/python.exe"`. PowerShell does not.
